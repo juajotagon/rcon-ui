@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - run: make vet
+      - run: make test
+
+      # Runs with CGO on purpose: the race detector requires it. This does not
+      # relax the CGO-free guarantee for the shipped daemon, which `crosscheck`
+      # enforces below.
+      - run: make race
+
+      # The daemon must cross-compile from a single runner with no C toolchain.
+      # If this breaks, a dependency has pulled in CGO or platform-specific code.
+      - run: make crosscheck

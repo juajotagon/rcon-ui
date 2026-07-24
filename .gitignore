@@ -1,0 +1,19 @@
+# build output
+/bin/
+/dist/
+
+# frontend build artifacts (embedded at build time, not committed)
+/web/node_modules/
+/web/dist/
+
+# local state: profiles DB, config, sealed credentials
+*.db
+*.db-shm
+*.db-wal
+/rcon-ui.yaml
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
