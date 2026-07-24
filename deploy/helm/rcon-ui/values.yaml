@@ -1,0 +1,80 @@
+image:
+  repository: ghcr.io/juajotagon/rcon-ui
+  tag: "" # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Authentication.
+#
+# The container binds to 0.0.0.0 because a container's loopback is unreachable
+# from outside it, so there is no "safe by default" bind address here as there
+# is for a local install. Anyone who can reach the Service can drive every
+# configured game server, and the chart refuses to render without a token.
+auth:
+  # Supply the token directly (Helm will create a Secret), or point at one you
+  # already manage. Exactly one is required.
+  token: ""
+  existingSecret: ""
+  tokenKey: token
+
+# Sealing key for stored RCON passwords.
+#
+# Without this the daemon generates a key beside the database, which means a
+# leaked volume contains both the sealed passwords and the key that opens them.
+# On Kubernetes the key belongs in a Secret, kept separate from the volume.
+sealingKey:
+  value: ""
+  existingSecret: ""
+  key: key
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  # ReadWriteOnce, and replicaCount is 1: SQLite is a single-writer database and
+  # a second replica sharing the volume would corrupt it. Scaling out would need
+  # a different store, not a bigger access mode.
+  accessMode: ReadWriteOnce
+
+service:
+  type: ClusterIP
+  port: 8477
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: rcon-ui.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+# The daemon is a single static binary that needs no write access outside its
+# data volume and no privileges at all.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+logLevel: info
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

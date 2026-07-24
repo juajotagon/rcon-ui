@@ -1,10 +1,10 @@
 # rcon-ui
 
-A protocol-agnostic RCON client for game servers, with a modern UI. Self-host it
-as a single static binary, or run it as a desktop app.
+A protocol-agnostic RCON client for game servers. A native desktop app for
+Linux and Windows, which can also run headless as a single static binary.
 
-> **Status: early.** The daemon, REST API and event stream work. The web UI is
-> not built yet. See [Roadmap](#roadmap).
+> **Status: working, unreleased.** The app runs and does what it says. There are
+> no packaged downloads yet, so you build it yourself. See [Roadmap](#roadmap).
 
 ## What this is
 
@@ -30,14 +30,28 @@ roadmap as an optional per-server addition, not a requirement.
 
 ## Try it
 
-Requires Go 1.25+. The only dependency is a pure-Go SQLite driver, so the daemon
-still builds with `CGO_ENABLED=0` and cross-compiles to Linux, Windows and macOS
-from any host.
+Requires Go 1.25+ and Node 20+.
+
+```sh
+# Desktop app — the normal way to run this.
+make desktop && ./bin/rcon-ui-desktop
+```
+
+The desktop build needs your platform's webview development headers
+(`webkit2gtk-4.1` and GTK 3 on Linux, WebView2 on Windows). It starts the same
+server the daemon runs, on a random loopback port behind a per-launch token, and
+points a native window at it — so there is one codebase and one transport, not a
+desktop fork.
+
+### Headless
+
+The same binary can run without a window, which is useful on a box you reach
+over the network:
 
 ```sh
 make build
 
-# Run the daemon. Binds to 127.0.0.1:8477 by default.
+# Binds to 127.0.0.1:8477 by default.
 ./bin/rcon-ui serve
 ```
 
@@ -81,9 +95,10 @@ from Git.
 Two things worth understanding before exposing this beyond localhost:
 
 - **`RCON_UI_KEY` seals stored passwords.** Without it, a key is generated
-  *beside* the database — fine for a local desktop install, wrong for a server,
-  because anyone who obtains the data volume obtains the passwords too. On
-  Kubernetes, populate it from a Secret.
+  *beside* the database, which is fine for a desktop install where both are
+  already behind your user account. On a shared or remote host it is not: anyone
+  who obtains the data directory obtains the passwords with it, so set the key
+  from the environment there.
 - **`-token` is the only authentication.** Binding to anything other than
   loopback without one hands RCON access to whoever can reach the port. The
   daemon warns at startup if you do.
@@ -157,10 +172,10 @@ server.
 
 - [x] Protocol core + registry, Source RCON, validation CLI
 - [x] Server profiles, sealed credentials, session manager, HTTP + SSE API
-- [ ] Web UI (embedded in the binary)
-- [ ] Desktop app (Wails)
-- [ ] Container image, Helm chart, signed release builds
-- [ ] Optional log streaming (Kubernetes pod logs, file tail, `docker logs`)
+- [x] Web UI (embedded in the binary)
+- [x] Desktop app (Wails)
+- [ ] Signed release builds for Linux and Windows
+- [ ] Optional log streaming (file tail, `docker logs`, Kubernetes pod logs)
 
 ## License
 

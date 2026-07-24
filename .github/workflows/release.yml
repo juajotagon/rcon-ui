@@ -1,0 +1,119 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # The desktop app cannot cross-compile: Wails links the target OS's native
+  # webview (WebKitGTK on Linux, WebView2 on Windows), so each artifact has to
+  # be produced on its own runner. This matrix is not an optimisation -- a
+  # single-host build simply cannot work.
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-amd64
+            binary: rcon-ui-desktop
+          - os: windows-latest
+            target: windows-amd64
+            binary: rcon-ui-desktop.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Ubuntu 22.04 ships webkit2gtk-4.0; newer releases ship only 4.1. The
+      # Makefile detects which is present, so the build follows whichever the
+      # runner provides.
+      - name: Install webview headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Build desktop app
+        run: make desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rcon-ui-desktop-${{ matrix.target }}
+          path: bin/${{ matrix.binary }}
+          if-no-files-found: error
+
+  # The headless daemon is CGO-free, so every target builds from one runner.
+  daemon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: make ui
+
+      - name: Cross-compile daemon
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          version="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 windows/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            ext=""; [ "$os" = "windows" ] && ext=".exe"
+            GOOS="$os" GOARCH="$arch" go build \
+              -ldflags "-s -w -X main.version=${version}" \
+              -o "dist/rcon-ui-${os}-${arch}${ext}" ./cmd/rcon-ui
+          done
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rcon-ui-daemon
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [desktop, daemon]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
+          # Binaries are unsigned, so Windows SmartScreen and macOS Gatekeeper
+          # will warn on first run. Saying so in the release notes is the
+          # minimum; code signing is a later cost decision.
+          body: |
+            Unsigned builds. Windows SmartScreen and macOS Gatekeeper will warn
+            on first run — this is expected until code signing is set up.
+
+            - `rcon-ui-desktop-*` — the desktop app
+            - `rcon-ui-*` — the headless daemon

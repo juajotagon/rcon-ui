@@ -1,0 +1,19 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rcon-ui.fullname" . }}-data
+  labels: {{- include "rcon-ui.labels" . | nindent 4 }}
+  annotations:
+    # The volume holds server profiles and their sealed passwords. Losing it on
+    # an uninstall would be silent and unrecoverable.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.persistence.accessMode }}]
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}
