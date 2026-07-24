@@ -84,6 +84,8 @@ Connect flags:
   -protocol string   RCON dialect (default "source")
   -timeout duration  per-command timeout (default 10s)
   -c string          run a single command and exit
+  -tls               wrap the connection in TLS (for TLS-terminating proxies)
+  -servername string TLS server name / SNI (defaults to the host in <host:port>)
 
 The password is read from $RCON_PASSWORD when -password is omitted. Passing it
 as a flag puts it in your shell history and in the process list, so prefer the
@@ -121,6 +123,8 @@ func cmdConnect(args []string) error {
 	protocol := fs.String("protocol", rcon.ProtocolSource, "RCON dialect")
 	timeout := fs.Duration("timeout", rcon.DefaultTimeout, "per-command timeout")
 	oneShot := fs.String("c", "", "run a single command and exit")
+	useTLS := fs.Bool("tls", false, "wrap the connection in TLS (for TLS-terminating proxies)")
+	serverName := fs.String("servername", "", "TLS server name / SNI (defaults to the host in <host:port>)")
 
 	positional, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -146,9 +150,11 @@ func cmdConnect(args []string) error {
 	defer cancel()
 
 	client, err := rcon.Dial(dialCtx, *protocol, rcon.Target{
-		Addr:     addr,
-		Password: *password,
-		Timeout:  *timeout,
+		Addr:       addr,
+		Password:   *password,
+		Timeout:    *timeout,
+		TLS:        *useTLS,
+		ServerName: *serverName,
 	})
 	if err != nil {
 		return err
