@@ -3,8 +3,8 @@
 A protocol-agnostic RCON client for game servers, with a modern UI. Self-host it
 as a single static binary, or run it as a desktop app.
 
-> **Status: early.** The protocol core and a validation CLI work. There is no UI
-> yet. See [Roadmap](#roadmap).
+> **Status: early.** The daemon, REST API and event stream work. The web UI is
+> not built yet. See [Roadmap](#roadmap).
 
 ## What this is
 
@@ -30,22 +30,92 @@ roadmap as an optional per-server addition, not a requirement.
 
 ## Try it
 
-Requires Go 1.24+. No other dependencies — the daemon builds with `CGO_ENABLED=0`
-and cross-compiles to Linux, Windows and macOS from any host.
+Requires Go 1.25+. The only dependency is a pure-Go SQLite driver, so the daemon
+still builds with `CGO_ENABLED=0` and cross-compiles to Linux, Windows and macOS
+from any host.
 
 ```sh
 make build
 
+# Run the daemon. Binds to 127.0.0.1:8477 by default.
+./bin/rcon-ui serve
+```
+
+Then drive it over HTTP:
+
+```sh
+# Add a server
+curl -X POST localhost:8477/api/servers -H 'Content-Type: application/json' \
+  -d '{"name":"Minecraft","addr":"mc.internal:25575","password":"secret"}'
+
+# Send a command
+curl -X POST localhost:8477/api/servers/<id>/execute \
+  -H 'Content-Type: application/json' -d '{"command":"list"}'
+
+# Watch the live event stream
+curl -N localhost:8477/api/events
+```
+
+There is also a one-off REPL, kept for validating the protocol against real
+servers:
+
+```sh
 # The password is read from $RCON_PASSWORD. Passing -password puts it in your
 # shell history and in the process list.
-RCON_PASSWORD=secret ./bin/rcon-ui connect mc.internal:25575
-
-# Or run a single command and exit:
 RCON_PASSWORD=secret ./bin/rcon-ui connect mc.internal:25575 -c list
 ```
 
-`connect` is a temporary REPL for validating the protocol against real servers.
-It will be replaced by the daemon and UI.
+### Configuration
+
+Settings resolve from a config file, then environment, then flags. Anything
+settable in the UI is settable in the file, so a deployment can be reproduced
+from Git.
+
+| Flag | Environment | Default |
+| --- | --- | --- |
+| `-addr` | `RCON_UI_ADDR` | `127.0.0.1:8477` |
+| `-data-dir` | `RCON_UI_DATA_DIR` | OS config dir |
+| `-token` | `RCON_UI_TOKEN` | none |
+| — | `RCON_UI_KEY` | generated locally |
+
+Two things worth understanding before exposing this beyond localhost:
+
+- **`RCON_UI_KEY` seals stored passwords.** Without it, a key is generated
+  *beside* the database — fine for a local desktop install, wrong for a server,
+  because anyone who obtains the data volume obtains the passwords too. On
+  Kubernetes, populate it from a Secret.
+- **`-token` is the only authentication.** Binding to anything other than
+  loopback without one hands RCON access to whoever can reach the port. The
+  daemon warns at startup if you do.
+
+## API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/servers` | list profiles with live status |
+| `POST` | `/api/servers` | add a profile |
+| `PATCH`/`DELETE` | `/api/servers/{id}` | edit / remove |
+| `POST` | `/api/servers/{id}/connect` | open a session |
+| `POST` | `/api/servers/{id}/execute` | run a command |
+| `GET` | `/api/servers/{id}/history` | recent commands |
+| `GET`/`POST` | `/api/macros` | saved commands |
+| `GET` | `/api/events` | live event stream (SSE) |
+
+Streaming is Server-Sent Events rather than WebSocket. The flow is strictly
+server-to-client — commands go the other way as plain POSTs — so SSE fits the
+shape exactly using only `net/http`, and `EventSource` provides reconnection and
+`Last-Event-ID` resumption without hand-written code.
+
+Every streamed frame is the same envelope, whatever produced it:
+
+```json
+{"seq":4,"profileId":"961f…","source":"rcon","stream":"response",
+ "line":"There are 3 of a max of 20 players online","at":"2026-07-24T01:29:26Z"}
+```
+
+A command and its reply are **two** events, not one paired object. That is what
+lets a future log source — which has no command half — join the same stream
+without changing the protocol or the console.
 
 ## Supported protocols
 
@@ -86,7 +156,7 @@ server.
 ## Roadmap
 
 - [x] Protocol core + registry, Source RCON, validation CLI
-- [ ] Server profiles, sealed credentials, session manager, HTTP/WebSocket API
+- [x] Server profiles, sealed credentials, session manager, HTTP + SSE API
 - [ ] Web UI (embedded in the binary)
 - [ ] Desktop app (Wails)
 - [ ] Container image, Helm chart, signed release builds

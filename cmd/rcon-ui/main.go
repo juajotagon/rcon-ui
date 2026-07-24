@@ -43,6 +43,8 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "serve":
+		return cmdServe(args[1:])
 	case "connect":
 		return cmdConnect(args[1:])
 	case "protocols":
@@ -66,9 +68,16 @@ func usage() {
 	fmt.Fprint(os.Stderr, `rcon-ui - RCON client
 
 Usage:
-  rcon-ui connect <host:port> [flags]   connect to a server
+  rcon-ui serve [flags]                 run the daemon and web API
+  rcon-ui connect <host:port> [flags]   one-off REPL against a server
   rcon-ui protocols                     list registered RCON dialects
   rcon-ui version                       print the version
+
+Serve flags:
+  -addr string       listen address (default 127.0.0.1:8477)
+  -config string     path to config file
+  -data-dir string   data directory
+  -token string      require this bearer token
 
 Connect flags:
   -password string   RCON password (prefer $RCON_PASSWORD)

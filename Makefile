@@ -36,12 +36,16 @@ tidy:
 
 # Proves the cross-compile guarantee holds. Kept green from Phase 0 onward so a
 # Windows-hostile or CGO-requiring dependency is caught the day it lands.
+#
+# Builds every package, not just the command: a dependency that fails to
+# cross-compile usually enters through a library (the SQLite driver being the
+# obvious candidate), and would go unnoticed until something imported it.
 .PHONY: crosscheck
 crosscheck:
-	GOOS=windows GOARCH=amd64 $(GO) build -o /dev/null ./cmd/rcon-ui
-	GOOS=linux   GOARCH=amd64 $(GO) build -o /dev/null ./cmd/rcon-ui
-	GOOS=linux   GOARCH=arm64 $(GO) build -o /dev/null ./cmd/rcon-ui
-	GOOS=darwin  GOARCH=arm64 $(GO) build -o /dev/null ./cmd/rcon-ui
+	GOOS=windows GOARCH=amd64 $(GO) build ./...
+	GOOS=linux   GOARCH=amd64 $(GO) build ./...
+	GOOS=linux   GOARCH=arm64 $(GO) build ./...
+	GOOS=darwin  GOARCH=arm64 $(GO) build ./...
 
 .PHONY: clean
 clean:
