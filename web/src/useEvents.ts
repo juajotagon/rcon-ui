@@ -65,7 +65,7 @@ export function useEvents(profileId: string | null) {
 
     // The daemon sets a per-stream `event:` name, so the default "message"
     // handler never fires; each named type has to be registered.
-    for (const name of ["command", "response", "status", "error"]) {
+    for (const name of ["command", "response", "status", "error", "discovery"]) {
       source.addEventListener(name, onMessage);
     }
 

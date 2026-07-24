@@ -115,6 +115,18 @@ function Line({ event }: { event: RconEvent }) {
     );
   }
 
+  // A discovery summary (freshly scanned, or re-scanned). Its own colour
+  // keeps it visually distinct from a plain status line -- it is telling you
+  // the control surface just changed shape, not just that the link state did.
+  if (event.stream === "discovery") {
+    return (
+      <div className="flex gap-2 text-xs" style={{ color: "var(--color-info)" }}>
+        <span className="shrink-0 opacity-60">{time}</span>
+        <span className="italic break-all">{event.line}</span>
+      </div>
+    );
+  }
+
   if (event.stream === "error") {
     return (
       <div className="flex gap-2" style={{ color: "var(--color-danger)" }}>

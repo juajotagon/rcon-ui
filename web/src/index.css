@@ -1,39 +1,58 @@
 @import "tailwindcss";
 
-/* Design tokens.
+/* Design tokens -- v2 "discovery-driven control surface" palette.
  *
  * Defined as CSS variables rather than hard-coded Tailwind colours so the whole
  * palette can be retargeted from one place -- "configurable if the user wants
  * to" starts here. Light and dark are both first-class; neither is a
- * filter over the other. */
+ * filter over the other.
+ *
+ * Values are the approved v2 mock's literal hex/rgba, not oklch
+ * reformulations -- the mock is the source of truth for this exact amber-on-
+ * slate identity, and re-deriving the colours in another space risks drifting
+ * from what was approved. `.dark` is applied to <html> by default (see
+ * index.html); the bare `@theme` block is the light variant, toggled by
+ * removing that class. */
 @theme {
-  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  --font-mono: "Cascadia Code", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --color-surface: oklch(100% 0 0);
-  --color-surface-raised: oklch(98.2% 0.002 260);
-  --color-surface-sunken: oklch(96.5% 0.003 260);
-  --color-border: oklch(90% 0.004 260);
-  --color-text: oklch(23% 0.01 260);
-  --color-text-muted: oklch(53% 0.012 260);
-  --color-accent: oklch(58% 0.16 255);
+  --color-bg: #eef0f4;
+  --color-surface: #f7f8fa;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #e6e9ef;
+  --color-border: #d4dae4;
+  --color-border-soft: #e1e6ee;
+  --color-text: #1b2231;
+  --color-text-muted: #5b6577;
+  --color-text-faint: #8a94a8;
+  --color-accent: #b97a10;
+  --color-accent-soft: rgba(185, 122, 16, 0.12);
+  --color-accent-ink: #ffffff;
 
-  --color-ok: oklch(62% 0.15 150);
-  --color-warn: oklch(72% 0.16 75);
-  --color-danger: oklch(58% 0.19 25);
+  --color-ok: #1d9a63;
+  --color-warn: #b97a10;
+  --color-danger: #c94a37;
+  --color-info: #2f7cc0;
 }
 
 .dark {
-  --color-surface: oklch(19% 0.008 260);
-  --color-surface-raised: oklch(23% 0.009 260);
-  --color-surface-sunken: oklch(15.5% 0.007 260);
-  --color-border: oklch(31% 0.011 260);
-  --color-text: oklch(93% 0.004 260);
-  --color-text-muted: oklch(66% 0.011 260);
-  --color-accent: oklch(70% 0.14 255);
+  --color-bg: #0c111b;
+  --color-surface: #111827;
+  --color-surface-raised: #161f30;
+  --color-surface-sunken: #0a0e17;
+  --color-border: #233045;
+  --color-border-soft: #1b2536;
+  --color-text: #e8ecf4;
+  --color-text-muted: #8b95a9;
+  --color-text-faint: #5c6679;
+  --color-accent: #f2a93b;
+  --color-accent-soft: rgba(242, 169, 59, 0.14);
+  --color-accent-ink: #1a1206;
 
-  --color-ok: oklch(72% 0.16 150);
-  --color-warn: oklch(78% 0.15 75);
-  --color-danger: oklch(68% 0.18 25);
+  --color-ok: #46c98a;
+  --color-warn: #f2a93b;
+  --color-danger: #e5604c;
+  --color-info: #5aa7e8;
 }
 
 @layer base {
@@ -48,7 +67,7 @@
   }
 
   body {
-    background: var(--color-surface);
+    background: var(--color-bg);
     color: var(--color-text);
     font-family:
       ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -76,6 +95,19 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* Shared by the rail's "connecting" status dot and the discovery strip's
+   * scanning indicator -- both mean "in progress, no verdict yet". */
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+    }
+  }
 }
 
 @layer components {
@@ -86,7 +118,8 @@
   }
   .btn-primary {
     background: var(--color-accent);
-    @apply text-white hover:opacity-90;
+    color: var(--color-accent-ink);
+    @apply font-semibold hover:opacity-90;
   }
   .btn-ghost {
     @apply hover:bg-[var(--color-surface-sunken)];
@@ -102,5 +135,45 @@
   }
   .field:focus {
     border-color: var(--color-accent);
+  }
+
+  /* Pill used for the discovery strip and rail fingerprint tags -- mono type,
+   * a hairline border, and an optional `.chip-accent` variant for the one chip
+   * that names the identified game rather than a fact about it. */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5
+           font-mono text-[11px] font-medium;
+    color: var(--color-text-muted);
+  }
+  .chip-accent {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  /* A switch is just a styled checkbox button; `aria-checked` (not a class)
+   * drives the visual state so assistive tech gets the real semantics free. */
+  .switch {
+    @apply relative inline-block h-[19px] w-[34px] shrink-0 cursor-pointer rounded-full border transition-colors;
+    background: var(--color-surface-sunken);
+  }
+  .switch::after {
+    content: "";
+    @apply absolute top-[2px] left-[2px] h-[13px] w-[13px] rounded-full transition-transform;
+    background: var(--color-text-muted);
+  }
+  .switch[aria-checked="true"] {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+  .switch[aria-checked="true"]::after {
+    transform: translateX(15px);
+    background: var(--color-accent-ink);
+  }
+
+  /* Restart-required marker on a settings row label. */
+  .badge-restart {
+    @apply ml-2 rounded border px-1 py-px align-middle font-mono text-[9px] font-semibold tracking-wider uppercase;
+    color: var(--color-info);
+    border-color: var(--color-info);
   }
 }
