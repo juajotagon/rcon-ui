@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/* Design tokens.
+ *
+ * Defined as CSS variables rather than hard-coded Tailwind colours so the whole
+ * palette can be retargeted from one place -- "configurable if the user wants
+ * to" starts here. Light and dark are both first-class; neither is a
+ * filter over the other. */
+@theme {
+  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+
+  --color-surface: oklch(100% 0 0);
+  --color-surface-raised: oklch(98.2% 0.002 260);
+  --color-surface-sunken: oklch(96.5% 0.003 260);
+  --color-border: oklch(90% 0.004 260);
+  --color-text: oklch(23% 0.01 260);
+  --color-text-muted: oklch(53% 0.012 260);
+  --color-accent: oklch(58% 0.16 255);
+
+  --color-ok: oklch(62% 0.15 150);
+  --color-warn: oklch(72% 0.16 75);
+  --color-danger: oklch(58% 0.19 25);
+}
+
+.dark {
+  --color-surface: oklch(19% 0.008 260);
+  --color-surface-raised: oklch(23% 0.009 260);
+  --color-surface-sunken: oklch(15.5% 0.007 260);
+  --color-border: oklch(31% 0.011 260);
+  --color-text: oklch(93% 0.004 260);
+  --color-text-muted: oklch(66% 0.011 260);
+  --color-accent: oklch(70% 0.14 255);
+
+  --color-ok: oklch(72% 0.16 150);
+  --color-warn: oklch(78% 0.15 75);
+  --color-danger: oklch(68% 0.18 25);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Visible focus everywhere: every action is reachable by keyboard, so it has
+   * to be visible when it has focus. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5
+           text-sm font-medium transition-colors disabled:pointer-events-none
+           disabled:opacity-50 cursor-pointer;
+  }
+  .btn-primary {
+    background: var(--color-accent);
+    @apply text-white hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply hover:bg-[var(--color-surface-sunken)];
+    color: var(--color-text-muted);
+  }
+  .btn-ghost:hover {
+    color: var(--color-text);
+  }
+
+  .field {
+    @apply w-full rounded-md border px-2.5 py-1.5 text-sm outline-none;
+    background: var(--color-surface-sunken);
+  }
+  .field:focus {
+    border-color: var(--color-accent);
+  }
+}

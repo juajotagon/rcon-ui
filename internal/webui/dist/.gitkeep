@@ -1,0 +1,2 @@
+Placeholder so `go build` works on a clone where the UI has not been built.
+Run `make ui` (or `make build`) to generate the real frontend here.

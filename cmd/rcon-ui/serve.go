@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,11 +17,12 @@ import (
 	"github.com/juajotagon/rcon-ui/internal/secret"
 	"github.com/juajotagon/rcon-ui/internal/session"
 	"github.com/juajotagon/rcon-ui/internal/store"
+	"github.com/juajotagon/rcon-ui/internal/webui"
 )
 
-// staticFS is the built frontend. Nil until Phase 3 embeds it, in which case
-// only the API is served -- which is exactly what the curl/SSE checks need.
-var staticFS fs.FS
+// staticFS is the built frontend, or nil when this build has no UI embedded --
+// in which case the API is served alone, which is all the curl/SSE checks need.
+var staticFS, hasUI = webui.FS()
 
 func cmdServe(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -102,7 +102,7 @@ func cmdServe(args []string) error {
 
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.Addr, "dataDir", cfg.DataDir, "ui", staticFS != nil)
+		log.Info("listening", "addr", cfg.Addr, "dataDir", cfg.DataDir, "ui", hasUI)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
