@@ -1,0 +1,61 @@
+List of server commands : 
+* additem : Give an item to a player. If no username is given then you will receive the item yourself. Count is optional. Use: /additem "username" "module.item" count. Example: /additem "rj" Base.Axe 5
+* addkey : Give a key to a player. If no username is given then you will receive the item yourself. Key name is optional. Use: /addkey "username" "keyId" "name". Example: /addkey "rj" "7295
+* addsteamid : Use this command to add a SteamID to a list of allowed SteamIDs on server. Use: /addSteamID "steamid"
+* addtosafehouse : Adds player to a safehouse. Use /addtosafehouse "title" "username"
+* adduser : Use this command to add a new user to a whitelisted server. Use: /adduser "username" "password" -- password is optional
+* addvehicle : Spawn a vehicle. Use: /addvehicle "script" "user or x,y,z", ex /addvehicle "Base.VanAmbulance" "rj"
+* addxp : Give XP to a player. Use /addxp "playername" perkname=xp -true. Example /addxp "rj" Woodwork=2 -true. The last argument is optional and is used to take xp multiplier into account
+* alarm : Sound a building alarm at the Admin's position. (Must be in a room)
+* banid : Ban a SteamID. Use /banid SteamID
+* banip : Ban IP. Use /banip IP
+* banuser : Ban a user. Add a -ip to also ban the IP. Add a -r "reason" to specify a reason for the ban. Use: /banuser "username" -ip -r "reason". For example: /banuser "rj" -ip -r "spawn kill"
+* changeoption : Change a server option. Use: /changeoption optionName "newValue"
+* checkModsNeedUpdate : Indicates whether a mod has been updated. Writes answer to log file
+* chopper : Place a helicopter event on a random player
+* createhorde : Spawn a horde near a player. Use : /createhorde count "username". Example /createhorde 150 "rj" Username is optional except from the server console. With no username the horde will be created around you
+* createhorde2 : UI_ServerOptionDesc_CreateHorde2
+* godmod : Make yourself invincible. Use: /godmode -value, ex /godmode -true (could be -false)
+* godmodplayer : Make a player invincible. Use: /godmodeplayer "username" -value, ex /godmodeplayer "rj" -true (could be -false)
+* gunshot : Place a gunshot sound on a random player
+* help : Help
+* invisible : Make yourself invisible to zombies. Use: /invisible -value, ex /invisible -true (could be -false)
+* invisibleplayer : Make a player invisible to zombies. Use: /invisibleplayer "username" -value, ex /invisibleplayer "rj" -true (could be -false)
+* kick : Kick a user. Add a -r "reason" to specify a reason for the kick. Use: /kickuser "username" -r "reason"
+* kickfromsafehouse : Removes player from a safehouse. Use /kickfromsafehouse "title" "username"
+* lightning : Use /lightning "username", username is optional except from the server console
+* list : UI_ServerOptionDesc_List
+* log : Set log level. Use /log %1$s %2$s
+* noclip : Makes a player pass through walls and structures. Toggles with no value. Use: /noclip "username" -value. Example /noclip "rj" -true (could be -false)
+* players : List all connected players
+* quit : Save and quit the server
+* releasesafehouse : Release a safehouse. Use /releasesafehouse "title"
+* reloadalllua : Reload a Lua script on the server. Use /reloadlua "filename"
+* reloadlua : Reload a Lua script on the server. Use /reloadlua "filename"
+* reloadoptions : Reload server options (ServerOptions.ini) and send to clients
+* remove : UI_ServerOptionDesc_Remove
+* removeitem : Remove items from yourself. Removes all items of type if count set to 0. Use: /removeitem "module.item" count. Example: /removeitem Base.Axe 5
+* removemapsymbolsforuser : Removes all shared in-game map symbols for a specific user. Use /removemapsymbolsforuser "username"
+* removesteamid : Use this command to remove a SteamID from a list of allowed SteamIDs on server. Use: /removeSteamID "steamid"
+* removeuserfromwhitelist : Remove a user from the whitelist. Use: /removeuserfromwhitelist "username"
+* removezombies : UI_ServerOptionDesc_RemoveZombies
+* save : Save the current world
+* servermsg : Broadcast a message to all connected players. Use: /servermsg "My Message"
+* setTimeSpeed : Set the time multiplier on the server. Use /setTimeSpeed period. Example /setTimeSpeed 10
+* setaccesslevel : Set access level of a player. Current levels: Admin, Moderator, Overseer, GM, Observer. Use /setaccesslevel "username" "accesslevel". Example /setaccesslevel "rj" "moderator"
+* setpassword : Use this command to change password for a user. Use: /setpassword "username" "newpassword"
+* showoptions : Show the list of current server options and values.
+* startrain : Starts raining on the server. Use /startrain "intensity", optional intensity is from 1 to 100
+* startstorm : Starts a storm on the server. Use /startstorm "duration", optional duration is in game hours
+* stats : Get server statistics. Use /stats help to get the details
+* stoprain : Stop raining on the server
+* stopweather : Stop weather on the server
+* teleport : Teleport to a player. Once teleported, wait for the map to appear. Use /teleport "playername" or /teleport "player1" "player2". Example /teleport "rj" or /teleport "rj" "toUser"
+* teleportplayer : Teleport a player to another player. Use /teleportplayer "player1" "player2". Example /teleportplayer "rj" "toUser"
+* teleportto : Teleport to coordinates. Use /teleportto x,y,z. Example /teleportto 10000,11000,0
+* thunder : Use /thunder "username", username is optional except from the server console
+* unbanid : Unban a SteamID. Use /unbanid SteamID
+* unbanip : Unban IP. Use /unbanip IP
+* unbanuser : Unban a player. Use /unbanuser "username"
+* voiceban : Block voice from user "username". Use /voiceban "username" -value. Example /voiceban "rj" -true (could be -false)
+* worldgen : Control full world generator. Use commands '/worldgen start', '/worldgen recheck', '/worldgen stop', and '/worldgen status'. Use

@@ -1,0 +1,3 @@
+ERR 0x4f 0x1a connection reset by peer :: mod loader stack trace follows
+><><><> unhandled exception in plugin dispatcher, see server.log for details
+qwq9f8 zzz -- no such command registered on this bus

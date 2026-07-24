@@ -1,0 +1,12 @@
+doDaylightCycle|ok|true
+doFireTick|ok|true
+mobGriefing|ok|false
+randomTickSpeed|ok|3
+maxCommandChainLength|ok|65536
+playersSleepingPercentage|ok|100
+spawnRadius|ok|10
+keepInventory|ok|false
+naturalRegeneration|ok|true
+announceAdvancements|ok|true
+doVinesSpread|garbled|Unknown gamerule, no such rule exists
+freezeDamage|missing|
