@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/juajotagon/rcon-ui/internal/api"
@@ -317,6 +318,58 @@ func TestAuthTokenRequired(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Errorf("with query token: %d, want 200", resp2.StatusCode)
+	}
+}
+
+// Regression: gating static assets on the bearer token made the desktop build
+// open a blank window. The document is reached at /?access_token=…, but a
+// browser attaches nothing to the <script> and <link> requests it then makes,
+// so they 401 and the application never boots. Only /api/ may require the
+// token.
+func TestStaticAssetsAreServedWithoutToken(t *testing.T) {
+	const token = "s3cret-token"
+
+	static := fstest.MapFS{
+		"index.html":     &fstest.MapFile{Data: []byte("<!doctype html><div id=root>")},
+		"assets/app.js":  &fstest.MapFile{Data: []byte("console.log(1)")},
+		"assets/app.css": &fstest.MapFile{Data: []byte("body{}")},
+	}
+
+	sealer, _ := secret.NewFromKey([]byte("k"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), sealer)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	hub := event.NewHub()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mgr := session.NewManager(st, hub, log)
+	t.Cleanup(mgr.Close)
+
+	srv := httptest.NewServer(api.New(st, hub, mgr, log, token, static).Handler())
+	t.Cleanup(srv.Close)
+
+	// Exactly what a webview requests after navigating: no credentials at all.
+	for _, path := range []string{"/", "/index.html", "/assets/app.js", "/assets/app.css"} {
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s = %d without a token, want 200; the UI cannot load otherwise", path, resp.StatusCode)
+		}
+	}
+
+	// The API stays protected.
+	resp, err := srv.Client().Get(srv.URL + "/api/servers")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("/api/servers = %d without a token, want 401", resp.StatusCode)
 	}
 }
 

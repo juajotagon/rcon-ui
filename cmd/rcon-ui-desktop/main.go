@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"time"
 
@@ -55,7 +56,7 @@ func run() error {
 		return err
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	key, _, err := secret.LoadOrCreateKey(cfg.DataDir)
 	if err != nil {
@@ -99,7 +100,7 @@ func run() error {
 	}
 
 	srv := &http.Server{
-		Handler:           api.New(st, hub, mgr, log, token, static).Handler(),
+		Handler:           accessLog(log, api.New(st, hub, mgr, log, token, static).Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: it would sever the SSE stream, which stays open for
 		// the lifetime of the window.
@@ -153,6 +154,67 @@ func run() error {
 			WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand,
 		},
 	})
+}
+
+// accessLog records requests reaching the loopback server.
+//
+// Worth keeping rather than deleting after debugging: the webview is opaque --
+// there is no devtools network tab in a production Wails build -- so "did the
+// page actually load" is otherwise unanswerable. Silence here means the webview
+// never navigated, which is a completely different fault from a page that
+// loaded and then failed.
+func accessLog(log *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+
+		// Logging the status, not just the request, is the point. An earlier
+		// version logged before calling the handler, so a 401 on the asset
+		// bundle looked exactly like a successful load -- the page appeared to
+		// fetch its JavaScript while actually receiving nothing.
+		log.Debug("request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"query", redactToken(r.URL.RawQuery))
+	})
+}
+
+// statusRecorder captures the response status for logging.
+//
+// It forwards Flush, without which the SSE stream would be buffered here and
+// the live console would never update -- the exact failure this wrapper exists
+// to make visible.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// redactToken keeps the session token out of the log while leaving other
+// query parameters (notably diagnostic messages) readable.
+func redactToken(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	values, err := neturl.ParseQuery(raw)
+	if err != nil {
+		return "<unparseable>"
+	}
+	if values.Has("access_token") {
+		values.Set("access_token", "<redacted>")
+	}
+	return values.Encode()
 }
 
 // bootstrapHandler serves a minimal page that redirects the webview to the

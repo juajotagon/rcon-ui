@@ -78,9 +78,23 @@ func (s *Server) Handler() http.Handler {
 // query parameter. The query form is not laziness: a browser's EventSource
 // cannot set custom headers, so a header-only scheme would make the event
 // stream unauthenticatable from the very client this serves.
+//
+// Only /api/ is protected. The frontend bundle is served unauthenticated, which
+// is a deliberate boundary rather than an oversight:
+//
+//   - A browser cannot attach a token to subresource requests. The document is
+//     reached at /?access_token=…, but the <script> and <link> it pulls in carry
+//     nothing, so gating them returns 401 and the application never starts. This
+//     is not hypothetical -- it made the desktop build load a blank window.
+//   - There is nothing to protect. index.html and the hashed assets are the same
+//     public build shipped in every release; they contain no credentials and no
+//     user data.
+//
+// The surface that matters -- every server profile, command and event -- is
+// under /api/ and stays behind the token.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.token == "" {
+		if s.token == "" || !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}
