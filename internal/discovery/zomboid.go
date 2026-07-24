@@ -66,9 +66,12 @@ func parseZomboidHelp(reply string) []Command {
 		}
 		name, desc := m[1], strings.TrimSpace(m[2])
 
+		// The Use: fragment moves into Usage rather than being copied, so a
+		// UI that renders both fields never shows the same text twice.
 		usage := ""
-		if um := zomboidUsage.FindStringSubmatch(desc); um != nil {
-			usage = strings.TrimSpace(um[1])
+		if loc := zomboidUsage.FindStringSubmatchIndex(desc); loc != nil {
+			usage = strings.TrimSpace(desc[loc[2]:loc[3]])
+			desc = strings.TrimSpace(desc[:loc[0]])
 		}
 		out = append(out, Command{Name: name, Description: desc, Usage: usage})
 	}
