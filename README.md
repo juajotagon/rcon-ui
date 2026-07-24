@@ -143,43 +143,6 @@ without changing the protocol or the console.
 "RCON" is not one protocol. Adding a dialect means writing a new package that
 implements `rcon.Dialer` and calling `rcon.Register` — no changes to callers.
 
-## Deploying to a server
-
-A container image and a Helm chart live under `deploy/`. Both assume the
-single-user model: one instance, one person, no accounts.
-
-```sh
-docker run -d --name rcon-ui \
-  -p 8477:8477 -v rcon-ui-data:/data \
-  -e RCON_UI_TOKEN=$(openssl rand -hex 32) \
-  -e RCON_UI_KEY=$(openssl rand -base64 32) \
-  ghcr.io/juajotagon/rcon-ui:latest
-```
-
-```sh
-helm install rcon-ui deploy/helm/rcon-ui \
-  --set auth.token=$(openssl rand -hex 32) \
-  --set sealingKey.value=$(openssl rand -base64 32)
-```
-
-The chart refuses to render without a token. Inside a container the daemon must
-bind to all interfaces — a container's loopback is unreachable from outside it —
-so the "safe by default" bind address that protects a local install does not
-apply, and anyone who can reach the Service could otherwise drive every game
-server you have configured.
-
-Two further constraints are enforced rather than documented and forgotten:
-
-- **`replicaCount` must be 1.** State is SQLite on a ReadWriteOnce volume; a
-  second replica would share the file and corrupt it. The chart fails on any
-  other value.
-- **The Deployment uses `Recreate`.** A rolling update would deadlock waiting
-  for the old pod to release the volume.
-
-Running it inside the cluster that hosts your game servers is worth doing on its
-own merits: RCON ports stay on the cluster network and only the HTTPS UI is
-exposed, rather than opening RCON to the internet.
-
 ## Development
 
 ```sh

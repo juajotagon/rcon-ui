@@ -56,7 +56,13 @@ func run() error {
 		return err
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// Honours RCON_UI_LOG_LEVEL like the daemon. accessLog below logs at debug
+	// level, so request tracing is opt-in rather than on in every release.
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+		level = slog.LevelInfo
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	key, _, err := secret.LoadOrCreateKey(cfg.DataDir)
 	if err != nil {
