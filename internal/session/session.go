@@ -321,8 +321,13 @@ type Session struct {
 
 	// broken is signalled by Execute when a command fails, waking the
 	// supervisor to reconnect rather than waiting for the next command.
-	brokenOnce sync.Once
-	broken     chan struct{}
+	// brokenClosed guards it against a double close and is reset alongside
+	// broken, under the same lock, on every reconnect -- so a channel from one
+	// connection generation can never be closed against the guard of another
+	// (which used to happen with a sync.Once field: Do() reads whatever Once is
+	// live *now*, not the one live when the channel was captured).
+	brokenClosed bool
+	broken       chan struct{}
 }
 
 func (s *Session) Status() Status {
@@ -374,14 +379,19 @@ func (s *Session) markBroken(err error) {
 	s.mu.Lock()
 	client := s.client
 	s.client = nil
-	ch := s.broken
+	// The close must happen in the same critical section that reads broken /
+	// brokenClosed: releasing the lock first (as a captured-channel-plus-Once
+	// design used to) lets a concurrent reconnect reset both fields between the
+	// read and the close, pairing a stale channel with a fresh guard and
+	// closing it twice.
+	if s.broken != nil && !s.brokenClosed {
+		s.brokenClosed = true
+		close(s.broken)
+	}
 	s.mu.Unlock()
 
 	if client != nil {
 		_ = client.Close()
-	}
-	if ch != nil {
-		s.brokenOnce.Do(func() { close(ch) })
 	}
 	s.setStatus(StatusDisconnected, err.Error())
 }
@@ -464,7 +474,7 @@ func (s *Session) supervise(ctx context.Context) {
 		s.mu.Lock()
 		s.client = client
 		s.broken = broken
-		s.brokenOnce = sync.Once{}
+		s.brokenClosed = false
 		s.mu.Unlock()
 
 		s.setStatus(StatusConnected, "")
