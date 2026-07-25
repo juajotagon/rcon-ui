@@ -75,6 +75,22 @@ func Dial(ctx context.Context, t rcon.Target) (*Client, error) {
 	return c, nil
 }
 
+// DefaultPort is assumed when an address names no port. 27015 is the Source
+// engine convention and Project Zomboid's RCON default, so a bare hostname --
+// the natural thing to type for a server behind a name-routing reverse proxy --
+// resolves to the port such a proxy most plausibly exposes. Games that moved
+// the port (Minecraft's 25575, say) still take an explicit one.
+const DefaultPort = "27015"
+
+// withDefaultPort appends DefaultPort when addr names none. SplitHostPort is
+// the arbiter so bracketed IPv6 literals pass through untouched.
+func withDefaultPort(addr string) string {
+	if _, _, err := net.SplitHostPort(addr); err == nil {
+		return addr
+	}
+	return net.JoinHostPort(strings.Trim(addr, "[]"), DefaultPort)
+}
+
 // dial opens the transport, optionally wrapped in TLS.
 //
 // TLS here is not part of the RCON dialect -- the protocol inside the tunnel is
@@ -84,9 +100,10 @@ func Dial(ctx context.Context, t rcon.Target) (*Client, error) {
 func dial(ctx context.Context, t rcon.Target) (net.Conn, error) {
 	var nd net.Dialer
 
-	conn, err := nd.DialContext(ctx, "tcp", t.Addr)
+	addr := withDefaultPort(t.Addr)
+	conn, err := nd.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("source: dial %s: %w", t.Addr, err)
+		return nil, fmt.Errorf("source: dial %s: %w", addr, err)
 	}
 	if !t.TLS {
 		return conn, nil
@@ -98,10 +115,10 @@ func dial(ctx context.Context, t rcon.Target) (net.Conn, error) {
 		// will fail verification against a certificate issued for a domain,
 		// which is correct: the alternative is silently accepting any
 		// certificate, and a password crosses this connection.
-		host, _, splitErr := net.SplitHostPort(t.Addr)
+		host, _, splitErr := net.SplitHostPort(addr)
 		if splitErr != nil {
 			conn.Close()
-			return nil, fmt.Errorf("source: cannot derive TLS server name from %q: %w", t.Addr, splitErr)
+			return nil, fmt.Errorf("source: cannot derive TLS server name from %q: %w", addr, splitErr)
 		}
 		serverName = host
 	}
@@ -123,7 +140,7 @@ func dial(ctx context.Context, t rcon.Target) (net.Conn, error) {
 
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("source: TLS handshake with %s (server name %q): %w", t.Addr, serverName, err)
+		return nil, fmt.Errorf("source: TLS handshake with %s (server name %q): %w", addr, serverName, err)
 	}
 	conn.SetDeadline(time.Time{}) // cleared; per-operation deadlines take over
 

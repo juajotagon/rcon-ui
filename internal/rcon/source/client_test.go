@@ -271,3 +271,19 @@ func TestRegistryUnknownProtocol(t *testing.T) {
 		t.Errorf("error %q should list the available protocols", err)
 	}
 }
+
+func TestWithDefaultPort(t *testing.T) {
+	cases := map[string]string{
+		"zomboid.example.com":       "zomboid.example.com:27015",
+		"zomboid.example.com:27016": "zomboid.example.com:27016",
+		"192.168.1.10":              "192.168.1.10:27015",
+		"192.168.1.10:25575":        "192.168.1.10:25575",
+		"[::1]:25575":               "[::1]:25575",
+		"[2001:db8::1]":             "[2001:db8::1]:27015",
+	}
+	for in, want := range cases {
+		if got := withDefaultPort(in); got != want {
+			t.Errorf("withDefaultPort(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
