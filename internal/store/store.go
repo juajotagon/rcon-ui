@@ -34,14 +34,16 @@ var ErrNotFound = errors.New("store: not found")
 // accident. That is a type-level guarantee rather than a convention someone has
 // to remember.
 type Server struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Protocol  string    `json:"protocol"`
-	Addr      string    `json:"addr"`
-	Group     string    `json:"group,omitempty"`
-	Game      string    `json:"game,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Protocol   string    `json:"protocol"`
+	Addr       string    `json:"addr"`
+	Group      string    `json:"group,omitempty"`
+	Game       string    `json:"game,omitempty"`
+	TLS        bool      `json:"tls,omitempty"`
+	ServerName string    `json:"serverName,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // Macro is a saved command, either global or bound to one server.
@@ -126,6 +128,9 @@ var migrations = []string{
 	CREATE INDEX history_server_at ON history(server_id, at DESC);`,
 
 	`ALTER TABLE servers ADD COLUMN game TEXT NOT NULL DEFAULT ''`,
+
+	`ALTER TABLE servers ADD COLUMN tls INTEGER NOT NULL DEFAULT 0;
+	 ALTER TABLE servers ADD COLUMN server_name TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {
@@ -196,9 +201,9 @@ func (s *Store) CreateServer(ctx context.Context, srv Server, password string) (
 	srv.UpdatedAt = now
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO servers (id, name, protocol, addr, grp, game, password, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		srv.ID, srv.Name, srv.Protocol, srv.Addr, srv.Group, srv.Game, sealed,
+		`INSERT INTO servers (id, name, protocol, addr, grp, game, tls, server_name, password, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		srv.ID, srv.Name, srv.Protocol, srv.Addr, srv.Group, srv.Game, srv.TLS, srv.ServerName, sealed,
 		now.UnixMilli(), now.UnixMilli())
 	if err != nil {
 		return Server{}, fmt.Errorf("store: insert server: %w", err)
@@ -225,6 +230,8 @@ func (s *Store) UpdateServer(ctx context.Context, id string, srv Server, passwor
 	}
 	existing.Group = srv.Group
 	existing.Game = srv.Game
+	existing.TLS = srv.TLS
+	existing.ServerName = srv.ServerName
 	existing.UpdatedAt = time.Now().UTC().Truncate(time.Millisecond)
 
 	if password != nil {
@@ -238,8 +245,8 @@ func (s *Store) UpdateServer(ctx context.Context, id string, srv Server, passwor
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE servers SET name = ?, protocol = ?, addr = ?, grp = ?, game = ?, updated_at = ? WHERE id = ?`,
-		existing.Name, existing.Protocol, existing.Addr, existing.Group, existing.Game,
+		`UPDATE servers SET name = ?, protocol = ?, addr = ?, grp = ?, game = ?, tls = ?, server_name = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Protocol, existing.Addr, existing.Group, existing.Game, existing.TLS, existing.ServerName,
 		existing.UpdatedAt.UnixMilli(), id)
 	if err != nil {
 		return Server{}, fmt.Errorf("store: update server: %w", err)
@@ -260,7 +267,7 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 
 func (s *Store) GetServer(ctx context.Context, id string) (Server, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, protocol, addr, grp, game, created_at, updated_at FROM servers WHERE id = ?`, id)
+		`SELECT id, name, protocol, addr, grp, game, tls, server_name, created_at, updated_at FROM servers WHERE id = ?`, id)
 
 	srv, err := scanServer(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -271,7 +278,7 @@ func (s *Store) GetServer(ctx context.Context, id string) (Server, error) {
 
 func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, protocol, addr, grp, game, created_at, updated_at
+		`SELECT id, name, protocol, addr, grp, game, tls, server_name, created_at, updated_at
 		 FROM servers ORDER BY grp, name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list servers: %w", err)
@@ -332,7 +339,7 @@ func scanServer(sc scanner) (Server, error) {
 		srv                  Server
 		createdMS, updatedMS int64
 	)
-	if err := sc.Scan(&srv.ID, &srv.Name, &srv.Protocol, &srv.Addr, &srv.Group, &srv.Game, &createdMS, &updatedMS); err != nil {
+	if err := sc.Scan(&srv.ID, &srv.Name, &srv.Protocol, &srv.Addr, &srv.Group, &srv.Game, &srv.TLS, &srv.ServerName, &createdMS, &updatedMS); err != nil {
 		return Server{}, err
 	}
 	srv.CreatedAt = time.UnixMilli(createdMS).UTC()

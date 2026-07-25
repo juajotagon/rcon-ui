@@ -146,12 +146,14 @@ func (s *Server) handleListServers(w http.ResponseWriter, r *http.Request) {
 // "absent" and "set to empty" stay distinguishable: an edit that omits it must
 // leave the stored password alone rather than wiping it.
 type serverRequest struct {
-	Name     string  `json:"name"`
-	Protocol string  `json:"protocol"`
-	Addr     string  `json:"addr"`
-	Group    string  `json:"group"`
-	Game     string  `json:"game"`
-	Password *string `json:"password"`
+	Name       string  `json:"name"`
+	Protocol   string  `json:"protocol"`
+	Addr       string  `json:"addr"`
+	Group      string  `json:"group"`
+	Game       string  `json:"game"`
+	TLS        bool    `json:"tls"`
+	ServerName string  `json:"serverName"`
+	Password   *string `json:"password"`
 }
 
 func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
@@ -166,11 +168,13 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	srv, err := s.store.CreateServer(r.Context(), store.Server{
-		Name:     req.Name,
-		Protocol: req.Protocol,
-		Addr:     req.Addr,
-		Group:    req.Group,
-		Game:     req.Game,
+		Name:       req.Name,
+		Protocol:   req.Protocol,
+		Addr:       req.Addr,
+		Group:      req.Group,
+		Game:       req.Game,
+		TLS:        req.TLS,
+		ServerName: req.ServerName,
 	}, *req.Password)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -197,11 +201,13 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 
 	id := r.PathValue("id")
 	srv, err := s.store.UpdateServer(r.Context(), id, store.Server{
-		Name:     req.Name,
-		Protocol: req.Protocol,
-		Addr:     req.Addr,
-		Group:    req.Group,
-		Game:     req.Game,
+		Name:       req.Name,
+		Protocol:   req.Protocol,
+		Addr:       req.Addr,
+		Group:      req.Group,
+		Game:       req.Game,
+		TLS:        req.TLS,
+		ServerName: req.ServerName,
 	}, req.Password)
 	if err != nil {
 		writeStoreError(w, err)

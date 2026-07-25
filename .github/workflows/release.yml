@@ -5,8 +5,15 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# id-token and attestations exist for the provenance steps: every artifact is
+# signed via GitHub's Sigstore integration, so a download can be verified with
+# `gh attestation verify <file> --repo juajotagon/rcon-ui`. This is supply-chain
+# provenance, not Authenticode -- SmartScreen still warns until a code-signing
+# certificate exists.
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   # The desktop app cannot cross-compile: Wails links the target OS's native
@@ -73,6 +80,10 @@ jobs:
         if: runner.os == 'Linux'
         run: make desktop
 
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: bin/${{ matrix.binary }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: rcon-ui-desktop-${{ matrix.target }}
@@ -111,6 +122,10 @@ jobs:
           done
           ls -la dist/
 
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
       - uses: actions/upload-artifact@v4
         with:
           name: rcon-ui-daemon
@@ -126,17 +141,36 @@ jobs:
         with:
           path: artifacts
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f ! -name SHA256SUMS -exec sha256sum {} \; | sed 's| \./[^/]*/| |' > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            artifacts/SHA256SUMS
           draft: true
-          # Binaries are unsigned, so Windows SmartScreen and macOS Gatekeeper
-          # will warn on first run. Saying so in the release notes is the
-          # minimum; code signing is a later cost decision.
+          # Not Authenticode-signed, so Windows SmartScreen and macOS
+          # Gatekeeper will warn on first run. Saying so in the release notes
+          # is the minimum; an OS-trusted certificate is a later cost decision.
+          # Every artifact does carry Sigstore build provenance, which proves
+          # what built it from what source.
           body: |
-            Unsigned builds. Windows SmartScreen and macOS Gatekeeper will warn
-            on first run — this is expected until code signing is set up.
-
             - `rcon-ui-desktop-*` — the desktop app
             - `rcon-ui-*` — the headless daemon
+
+            **Verify a download** (proves it was built by this repo's release
+            workflow from this source):
+
+            ```
+            gh attestation verify <file> --repo juajotagon/rcon-ui
+            sha256sum --check --ignore-missing SHA256SUMS
+            ```
+
+            Binaries are not Authenticode-signed, so Windows SmartScreen and
+            macOS Gatekeeper will warn on first run — expected until OS code
+            signing is set up.

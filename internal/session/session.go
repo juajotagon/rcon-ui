@@ -510,7 +510,9 @@ func (s *Session) dial(ctx context.Context) (rcon.Client, error) {
 	defer cancel()
 
 	return rcon.Dial(dialCtx, srv.Protocol, rcon.Target{
-		Addr:     srv.Addr,
-		Password: password,
+		Addr:       srv.Addr,
+		Password:   password,
+		TLS:        srv.TLS,
+		ServerName: srv.ServerName,
 	})
 }

@@ -192,6 +192,43 @@ func TestServerGameField(t *testing.T) {
 	}
 }
 
+// TLS and ServerName round-trip through create and come back out of the
+// response, matching how Game already flows through serverResponse's embedded
+// store.Server.
+func TestServerTLSFields(t *testing.T) {
+	h := newHarness(t, "", rcontest.Options{})
+
+	resp, body := h.do(t, "POST", "/api/servers", map[string]any{
+		"name": "pz", "addr": h.rcon.Addr(), "password": h.rcon.Password(),
+		"tls": true, "serverName": "zomboid.juanjo.site",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var created struct {
+		ID         string `json:"id"`
+		TLS        bool   `json:"tls"`
+		ServerName string `json:"serverName"`
+	}
+	json.Unmarshal(body, &created)
+	if !created.TLS || created.ServerName != "zomboid.juanjo.site" {
+		t.Errorf("got tls=%v serverName=%q, want tls=true serverName=zomboid.juanjo.site", created.TLS, created.ServerName)
+	}
+
+	resp, body = h.do(t, "GET", "/api/servers/"+created.ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get: %d %s", resp.StatusCode, body)
+	}
+	var got struct {
+		TLS        bool   `json:"tls"`
+		ServerName string `json:"serverName"`
+	}
+	json.Unmarshal(body, &got)
+	if !got.TLS || got.ServerName != "zomboid.juanjo.site" {
+		t.Errorf("got tls=%v serverName=%q, want tls=true serverName=zomboid.juanjo.site", got.TLS, got.ServerName)
+	}
+}
+
 // The password must never come back out of the API, in any response.
 func TestPasswordNeverReturned(t *testing.T) {
 	h := newHarness(t, "", rcontest.Options{})
