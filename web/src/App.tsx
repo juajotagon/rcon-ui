@@ -8,10 +8,16 @@ import { ServerDialog } from "./components/ServerDialog";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandsPanel } from "./components/CommandsPanel";
+import { TemplatesPanel } from "./components/TemplatesPanel";
 
 const SELECTED_KEY = "rcon-ui:selected";
 
 type Tab = "settings" | "commands" | "console";
+
+// Templates is a top-level mode, not a tab -- it has to render with zero
+// servers configured and without any server selected, which a tab nested
+// inside the `selected`-server branch below could never do.
+type View = "server" | "templates";
 
 /** The rung of the degradation ladder a report puts a server on, in priority
  * order -- options+commands, then commands only, then raw console. Used both
@@ -36,6 +42,7 @@ export function App() {
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [view, setView] = useState<View>("server");
 
   const [report, setReport] = useState<DiscoveryReport | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -180,6 +187,7 @@ export function App() {
     const list: Command[] = [
       { id: "add", label: "Add server…", run: () => setDialog({ open: true, server: null }) },
       { id: "theme", label: "Toggle light / dark", run: () => document.documentElement.classList.toggle("dark") },
+      { id: "open-templates", label: "Browse templates", run: () => setView("templates") },
     ];
 
     if (selected) {
@@ -220,13 +228,20 @@ export function App() {
       <Sidebar
         servers={servers}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={(id) => {
+          setView("server");
+          setSelectedId(id);
+        }}
         onAdd={() => setDialog({ open: true, server: null })}
         onOpenPalette={() => setPaletteOpen(true)}
+        templatesActive={view === "templates"}
+        onOpenTemplates={() => setView("templates")}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {loadError ? (
+        {view === "templates" ? (
+          <TemplatesPanel />
+        ) : loadError ? (
           <Centered>
             <p className="text-sm" style={{ color: "var(--color-danger)" }}>
               Cannot reach the rcon-ui daemon.

@@ -12,7 +12,10 @@ function buildCommand(template: string, key: string, value: string): string {
   return template.replaceAll("{key}", key).replaceAll("{value}", value);
 }
 
-interface Row {
+// Exported so TemplatesPanel can render curated catalog entries through the
+// exact same row/control visuals -- both are stateless functions of `Row`,
+// so reuse is a straight export rather than a fork or a second component.
+export interface Row {
   key: string;
   value: string;
   type: DiscoveredOption["type"];
@@ -224,7 +227,7 @@ export function SettingsPanel({
   );
 }
 
-function OptionRow({
+export function OptionRow({
   row,
   staged,
   error,
@@ -283,7 +286,7 @@ function OptionRow({
   );
 }
 
-function Control({
+export function Control({
   row,
   value,
   readOnly,
