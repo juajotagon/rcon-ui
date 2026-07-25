@@ -47,12 +47,19 @@ export function Sidebar({
   onSelect,
   onAdd,
   onOpenPalette,
+  templatesActive,
+  onOpenTemplates,
 }: {
   servers: Server[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onOpenPalette: () => void;
+  // Templates is server-independent -- it lives in the rail rather than the
+  // server list because it isn't a server at all, and stays reachable even
+  // with zero servers configured.
+  templatesActive: boolean;
+  onOpenTemplates: () => void;
 }) {
   const groups = useMemo(() => {
     const byGroup = new Map<string, Server[]>();
@@ -87,6 +94,20 @@ export function Sidebar({
           </kbd>
         </button>
       </header>
+
+      <button
+        onClick={onOpenTemplates}
+        aria-current={templatesActive}
+        className="mx-2 mb-1 flex items-center gap-2 rounded-md border-l-2 px-2.5 py-2 text-left"
+        style={{
+          borderLeftColor: templatesActive ? "var(--color-accent)" : "transparent",
+          background: templatesActive ? "var(--color-surface)" : "transparent",
+          color: templatesActive ? "var(--color-text)" : "var(--color-text-muted)",
+        }}
+      >
+        <span className="text-[13px] font-semibold">Templates</span>
+        <span className="chip ml-auto px-[5px] py-px text-[10px]">catalog</span>
+      </button>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-1">
         {servers.length === 0 && (

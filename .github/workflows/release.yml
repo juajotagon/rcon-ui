@@ -1,7 +1,18 @@
 name: release
 
+# Releases are cut automatically on every merge to main, and can still be cut
+# by pushing a v* tag by hand. The version job below is the difference: on a
+# tag it honours the tag, and on a main push it derives the next version and
+# creates the tag itself.
+#
+# Why not "auto-tag on merge, let the existing tag trigger fire"? A tag pushed
+# by a workflow using the default GITHUB_TOKEN does not trigger another
+# workflow -- that guard against recursion would leave the release silently
+# unbuilt. So the release runs on the branch push directly and creates the tag
+# as part of publishing.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -9,18 +20,84 @@ on:
 # signed via GitHub's Sigstore integration, so a download can be verified with
 # `gh attestation verify <file> --repo juajotagon/rcon-ui`. This is supply-chain
 # provenance, not Authenticode -- SmartScreen still warns until a code-signing
-# certificate exists.
+# certificate exists. contents:write lets the publish step create the tag and
+# the release.
 permissions:
   contents: write
   id-token: write
   attestations: write
 
 jobs:
+  # Decides whether this run releases, and under what version. A tag push is
+  # taken at its word; a main push bumps the latest tag (patch by default,
+  # #minor / #major in the merge commit to go higher) and opts out on
+  # [skip release] or a commit that is already tagged.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      release: ${{ steps.compute.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the whole tag history, to find and bump the latest
+      - id: compute
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Triggered by tag ${GITHUB_REF_NAME}."
+            exit 0
+          fi
+
+          msg="$(git log -1 --pretty=%B)"
+
+          if grep -qiE '\[skip release\]' <<<"$msg"; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "Commit asks for [skip release]; not releasing."
+            exit 0
+          fi
+
+          # A commit that already carries a tag was released by that tag's run;
+          # releasing again from the branch push would collide.
+          if git describe --exact-match --tags HEAD >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "HEAD is already tagged $(git describe --exact-match --tags HEAD); nothing to do."
+            exit 0
+          fi
+
+          latest="$(git tag -l 'v*' --sort=-v:refname | head -n1)"
+          latest="${latest:-v0.0.0}"
+          IFS=. read -r major minor patch <<<"${latest#v}"
+
+          if grep -qiE '#major' <<<"$msg"; then
+            major=$((major + 1)); minor=0; patch=0
+          elif grep -qiE '#minor' <<<"$msg"; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          next="v${major}.${minor}.${patch}"
+
+          if git rev-parse -q --verify "refs/tags/${next}" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "Computed ${next} but it already exists; not releasing."
+            exit 0
+          fi
+
+          echo "version=${next}" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${next} (bumped from ${latest})."
+
   # The desktop app cannot cross-compile: Wails links the target OS's native
   # webview (WebKitGTK on Linux, WebView2 on Windows), so each artifact has to
   # be produced on its own runner. This matrix is not an optimisation -- a
   # single-host build simply cannot work.
   desktop:
+    needs: version
+    if: needs.version.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +110,8 @@ jobs:
             binary: rcon-ui-desktop.exe
 
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -64,21 +143,17 @@ jobs:
       # no version to detect. Invoking go build directly keeps the Makefile
       # honest as a Linux/macOS convenience rather than pretending to be
       # cross-platform.
-      #
-      # UNVERIFIED: this workflow has never been executed. The Windows job in
-      # particular is reasoned about, not observed. Run it via workflow_dispatch
-      # before trusting a tag to produce Windows artifacts.
       - name: Build desktop app (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           go build -tags desktop,production \
-            -ldflags "-s -w -H windowsgui -X main.version=${GITHUB_REF_NAME:-dev}" \
+            -ldflags "-s -w -H windowsgui -X main.version=${VERSION}" \
             -o bin/rcon-ui-desktop.exe ./cmd/rcon-ui-desktop
 
       - name: Build desktop app (Linux)
         if: runner.os == 'Linux'
-        run: make desktop
+        run: make desktop VERSION="${VERSION}"
 
       - uses: actions/attest-build-provenance@v2
         with:
@@ -91,8 +166,14 @@ jobs:
           if-no-files-found: error
 
   # The headless daemon is CGO-free, so every target builds from one runner.
+  # This job also runs the test suite: it gates publish (which needs it), so a
+  # broken main is built but never released.
   daemon:
+    needs: version
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -107,17 +188,21 @@ jobs:
 
       - run: make ui
 
+      - name: Test before release
+        run: |
+          make vet
+          make test
+
       - name: Cross-compile daemon
         env:
           CGO_ENABLED: "0"
         run: |
-          version="${GITHUB_REF_NAME}"
           mkdir -p dist
           for target in linux/amd64 linux/arm64 windows/amd64 darwin/arm64; do
             os="${target%/*}"; arch="${target#*/}"
             ext=""; [ "$os" = "windows" ] && ext=".exe"
             GOOS="$os" GOARCH="$arch" go build \
-              -ldflags "-s -w -X main.version=${version}" \
+              -ldflags "-s -w -X main.version=${VERSION}" \
               -o "dist/rcon-ui-${os}-${arch}${ext}" ./cmd/rcon-ui
           done
           ls -la dist/
@@ -133,8 +218,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [desktop, daemon]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, desktop, daemon]
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -150,12 +235,18 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          # On a main push the tag does not exist yet; tag_name + target_commitish
+          # create it at this commit. On a tag push it already exists and is
+          # reused.
+          tag_name: ${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.version.outputs.version }}
           files: |
             artifacts/**/*
             artifacts/SHA256SUMS
-          # Published immediately rather than as a draft: tags are only pushed
-          # deliberately, and the point of a release is a public download link
-          # on the repository page without a second manual step.
+          # Published immediately rather than as a draft: the point of an
+          # automatic release is a public download link on the repository page
+          # with no second manual step.
           draft: false
           # Not Authenticode-signed, so Windows SmartScreen and macOS
           # Gatekeeper will warn on first run. Saying so in the release notes

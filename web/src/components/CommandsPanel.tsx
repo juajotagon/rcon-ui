@@ -1,5 +1,41 @@
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type { DiscoveryReport } from "../api";
+
+/** The name + description/usage cells shared with TemplatesPanel's read-only
+ * command list. `leading` is a slot for CommandsPanel's own pin button --
+ * the catalog has nothing to pin (there's no server to run a command
+ * against), so it simply omits the prop rather than this component forking
+ * into two near-identical layouts.
+ */
+export function CommandCells({
+  name,
+  description,
+  usage,
+  leading,
+}: {
+  name: string;
+  description: string;
+  usage?: string;
+  leading?: ReactNode;
+}) {
+  return (
+    <>
+      <span className="font-mono text-[12.5px] font-medium">
+        {leading}
+        {name}
+      </span>
+      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+        {description}
+        {usage && (
+          <span className="ml-1.5 font-mono" style={{ color: "var(--color-text-faint)" }}>
+            Use: {usage}
+          </span>
+        )}
+      </span>
+    </>
+  );
+}
 
 /** CommandsPanel is the catalog view: everything the daemon parsed out of the
  * server's own help reply, filterable and pinnable. Nothing here is run
@@ -98,26 +134,22 @@ export function CommandsPanel({
               className="grid grid-cols-[200px_minmax(0,1fr)_auto] items-center gap-4 rounded-md border-t px-2.5 py-2 first:border-t-0"
               style={{ borderColor: "var(--color-border-soft)" }}
             >
-              <span className="font-mono text-[12.5px] font-medium">
-                <button
-                  onClick={() => togglePin(cmd.name)}
-                  aria-pressed={pinned}
-                  aria-label={pinned ? `Unpin ${cmd.name}` : `Pin ${cmd.name}`}
-                  className="mr-1.5 cursor-pointer text-[11px]"
-                  style={{ color: pinned ? "var(--color-accent)" : "var(--color-text-faint)" }}
-                >
-                  ★
-                </button>
-                {cmd.name}
-              </span>
-              <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                {cmd.description}
-                {cmd.usage && (
-                  <span className="ml-1.5 font-mono" style={{ color: "var(--color-text-faint)" }}>
-                    Use: {cmd.usage}
-                  </span>
-                )}
-              </span>
+              <CommandCells
+                name={cmd.name}
+                description={cmd.description}
+                usage={cmd.usage}
+                leading={
+                  <button
+                    onClick={() => togglePin(cmd.name)}
+                    aria-pressed={pinned}
+                    aria-label={pinned ? `Unpin ${cmd.name}` : `Pin ${cmd.name}`}
+                    className="mr-1.5 cursor-pointer text-[11px]"
+                    style={{ color: pinned ? "var(--color-accent)" : "var(--color-text-faint)" }}
+                  >
+                    ★
+                  </button>
+                }
+              />
               <button
                 disabled={!connected}
                 onClick={() => (immediate ? onExecute(cmd.name) : onRunPrefill(cmd.name + " "))}
