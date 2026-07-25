@@ -102,11 +102,14 @@ export function ServerDialog({
             />
           </Field>
 
-          <Field label="Address" hint="host:port — the RCON port, not the game port">
+          <Field
+            label="Address"
+            hint="Port is optional and defaults to 27015 (Source/Zomboid). Other games need their RCON port — Minecraft is 25575 — not the game port."
+          >
             <input
               value={addr}
               onChange={(e) => setAddr(e.target.value)}
-              placeholder="mc.example.com:25575"
+              placeholder="zomboid.example.com"
               className="field font-mono"
             />
           </Field>

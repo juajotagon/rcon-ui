@@ -153,7 +153,10 @@ jobs:
           files: |
             artifacts/**/*
             artifacts/SHA256SUMS
-          draft: true
+          # Published immediately rather than as a draft: tags are only pushed
+          # deliberately, and the point of a release is a public download link
+          # on the repository page without a second manual step.
+          draft: false
           # Not Authenticode-signed, so Windows SmartScreen and macOS
           # Gatekeeper will warn on first run. Saying so in the release notes
           # is the minimum; an OS-trusted certificate is a later cost decision.
