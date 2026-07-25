@@ -30,8 +30,8 @@ permissions:
 jobs:
   # Decides whether this run releases, and under what version. A tag push is
   # taken at its word; a main push bumps the latest tag (patch by default,
-  # #minor / #major in the merge commit to go higher) and opts out on
-  # [skip release] or a commit that is already tagged.
+  # #minor / #major in the PR title / commit subject to go higher) and opts
+  # out on [skip release] in the subject or a commit that is already tagged.
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -52,7 +52,12 @@ jobs:
             exit 0
           fi
 
-          msg="$(git log -1 --pretty=%B)"
+          # Only the subject line, never the full body: a squash-merge
+          # concatenates every commit message into the body, so scanning %B
+          # let a commit that merely *described* these tokens (in prose) trip
+          # them. Tokens must be placed deliberately in the PR title / commit
+          # subject to take effect.
+          msg="$(git log -1 --pretty=%s)"
 
           if grep -qiE '\[skip release\]' <<<"$msg"; then
             echo "release=false" >> "$GITHUB_OUTPUT"
