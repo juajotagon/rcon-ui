@@ -59,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/servers/{id}/disconnect", s.handleDisconnect)
 	mux.HandleFunc("POST /api/servers/{id}/execute", s.handleExecute)
 	mux.HandleFunc("GET /api/servers/{id}/history", s.handleHistory)
+	mux.HandleFunc("GET /api/servers/{id}/discovery", s.handleGetDiscovery)
+	mux.HandleFunc("POST /api/servers/{id}/discover", s.handleDiscover)
 
 	mux.HandleFunc("GET /api/macros", s.handleListMacros)
 	mux.HandleFunc("POST /api/macros", s.handleCreateMacro)
@@ -148,6 +150,7 @@ type serverRequest struct {
 	Protocol string  `json:"protocol"`
 	Addr     string  `json:"addr"`
 	Group    string  `json:"group"`
+	Game     string  `json:"game"`
 	Password *string `json:"password"`
 }
 
@@ -167,6 +170,7 @@ func (s *Server) handleCreateServer(w http.ResponseWriter, r *http.Request) {
 		Protocol: req.Protocol,
 		Addr:     req.Addr,
 		Group:    req.Group,
+		Game:     req.Game,
 	}, *req.Password)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -197,6 +201,7 @@ func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
 		Protocol: req.Protocol,
 		Addr:     req.Addr,
 		Group:    req.Group,
+		Game:     req.Game,
 	}, req.Password)
 	if err != nil {
 		writeStoreError(w, err)
@@ -266,6 +271,33 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"response": resp})
+}
+
+// handleGetDiscovery returns the cached report from the last discovery run,
+// automatic or manual. It never triggers a new run itself -- that is what
+// POST .../discover is for -- so a server nobody has connected to yet
+// legitimately has nothing to return.
+func (s *Server) handleGetDiscovery(w http.ResponseWriter, r *http.Request) {
+	report, ok := s.mgr.LastDiscovery(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, errors.New("no discovery yet"))
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// handleDiscover runs discovery synchronously against the live session and
+// returns the fresh report. It requires an already-connected session rather
+// than connecting on demand, matching Discover's contract: a caller asking
+// what a server is wants a fast, honest answer, not a wait for a connection
+// that may never come up.
+func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
+	report, err := s.mgr.Discover(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusConflict, errors.New("not connected"))
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {

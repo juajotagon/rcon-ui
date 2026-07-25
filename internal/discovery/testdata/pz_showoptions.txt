@@ -1,0 +1,18 @@
+List of Server Options :
+* PVP=true
+* PauseEmpty=true
+* GlobalChatEnabled=true
+* Open=true
+* AutoCreateUserInWhiteList=false
+* DisplayUserName=true
+SpawnPoint=0,0,0
+* SafetySystem=true
+* SafetyToggleTimer=2
+* MinutesPerPage=1.0
+* Map=Muldraugh, KY
+
+* MaxPlayers=32
+* PingLimit=400
+* Password=hunter2
+* AdminPassword=letmein
+* ServerWelcomeMessage=Welcome to Project Zomboid Multiplayer!

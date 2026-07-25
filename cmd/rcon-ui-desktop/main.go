@@ -24,12 +24,15 @@ import (
 	"net/http"
 	neturl "net/url"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/juajotagon/rcon-ui/internal/api"
 	"github.com/juajotagon/rcon-ui/internal/config"
@@ -134,6 +137,23 @@ func run() error {
 		MinHeight: 480,
 
 		BackgroundColour: &options.RGBA{R: 22, G: 24, B: 29, A: 255},
+
+		// Quit on SIGINT/SIGTERM. Without a handler the process ignores a plain
+		// `kill` -- Wails installs none of its own -- so the only way to stop it
+		// is `kill -9`. That is especially bad under a compositor that draws no
+		// window decorations (niri and other tiling Wayland compositors give the
+		// window no titlebar and so no close button), where there is otherwise no
+		// way out at all. OnStartup is where the Wails runtime context first
+		// becomes available, which runtime.Quit needs.
+		OnStartup: func(ctx context.Context) {
+			go func() {
+				sig := make(chan os.Signal, 1)
+				signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+				s := <-sig
+				log.Info("received signal, shutting down", "signal", s.String())
+				wailsruntime.Quit(ctx)
+			}()
+		},
 
 		// Wails serves only a bootstrap page, which immediately redirects to
 		// the loopback server above.

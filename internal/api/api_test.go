@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/juajotagon/rcon-ui/internal/api"
+	"github.com/juajotagon/rcon-ui/internal/discovery"
 	"github.com/juajotagon/rcon-ui/internal/event"
 	"github.com/juajotagon/rcon-ui/internal/rcontest"
 	"github.com/juajotagon/rcon-ui/internal/secret"
@@ -141,6 +143,55 @@ func TestServerCRUD(t *testing.T) {
 	}
 }
 
+// The game field round-trips through create, update and clear, and it must
+// come back out of every response that carries a profile -- it flows through
+// serverResponse's embedded store.Server, so this also pins that the API
+// layer doesn't need its own copy of the field.
+func TestServerGameField(t *testing.T) {
+	h := newHarness(t, "", rcontest.Options{})
+
+	resp, body := h.do(t, "POST", "/api/servers", map[string]any{
+		"name": "pz", "addr": h.rcon.Addr(), "password": h.rcon.Password(), "game": "zomboid",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var created struct {
+		ID   string `json:"id"`
+		Game string `json:"game"`
+	}
+	json.Unmarshal(body, &created)
+	if created.Game != "zomboid" {
+		t.Errorf("game = %q, want zomboid", created.Game)
+	}
+
+	resp, body = h.do(t, "PATCH", "/api/servers/"+created.ID, map[string]any{"name": "pz", "game": "minecraft"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update: %d %s", resp.StatusCode, body)
+	}
+	var updated struct {
+		Game string `json:"game"`
+	}
+	json.Unmarshal(body, &updated)
+	if updated.Game != "minecraft" {
+		t.Errorf("game = %q, want minecraft", updated.Game)
+	}
+
+	// Omitting game from the request body must clear it, matching Group's
+	// overwrite semantics -- there is no separate "leave alone" signal.
+	resp, body = h.do(t, "PATCH", "/api/servers/"+created.ID, map[string]any{"name": "pz"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear: %d %s", resp.StatusCode, body)
+	}
+	var cleared struct {
+		Game string `json:"game"`
+	}
+	json.Unmarshal(body, &cleared)
+	if cleared.Game != "" {
+		t.Errorf("game = %q, want cleared", cleared.Game)
+	}
+}
+
 // The password must never come back out of the API, in any response.
 func TestPasswordNeverReturned(t *testing.T) {
 	h := newHarness(t, "", rcontest.Options{})
@@ -171,8 +222,18 @@ func TestExecuteCommand(t *testing.T) {
 		t.Errorf("response = %q, want %q", out.Response, want)
 	}
 
-	if cmds := h.rcon.Commands(); len(cmds) != 1 || cmds[0] != "list" {
-		t.Errorf("server received %v, want [list]", cmds)
+	// Connecting now also fires an automatic discovery run in the background
+	// (showoptions, help, ...), so the wire no longer carries only what this
+	// test asked for -- just that "list" is among what it sent, not that it
+	// was alone.
+	found := false
+	for _, cmd := range h.rcon.Commands() {
+		if cmd == "list" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("server did not receive %q, got %v", "list", h.rcon.Commands())
 	}
 }
 
@@ -458,5 +519,177 @@ func TestMacros(t *testing.T) {
 
 	if resp, _ = h.do(t, "DELETE", "/api/macros/"+macros[0].ID, nil); resp.StatusCode != http.StatusNoContent {
 		t.Errorf("delete macro: %d", resp.StatusCode)
+	}
+}
+
+// pzHandler answers showoptions/help exactly as a real Project Zomboid server
+// does, reusing the transcripts internal/discovery already pins its own
+// parser tests against rather than duplicating them here.
+func pzHandler(t testing.TB) func(cmd string) string {
+	t.Helper()
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join("..", "discovery", "testdata", name))
+		if err != nil {
+			t.Fatalf("read testdata %s: %v", name, err)
+		}
+		return string(data)
+	}
+	showoptions := read("pz_showoptions.txt")
+	help := read("pz_help.txt")
+
+	return func(cmd string) string {
+		switch cmd {
+		case "showoptions":
+			return showoptions
+		case "help":
+			return help
+		default:
+			return "unknown command"
+		}
+	}
+}
+
+// TestDiscoveryEndToEnd exercises the whole discovery contract through the
+// HTTP API: nothing before any run, the automatic post-connect run
+// populating the cache asynchronously, a manual re-run, and 409 once the
+// session drops.
+func TestDiscoveryEndToEnd(t *testing.T) {
+	h := newHarness(t, "", rcontest.Options{Handler: pzHandler(t)})
+	id := h.createServer(t)
+
+	// No discovery has run yet: 404, not an empty report.
+	resp, body := h.do(t, "GET", "/api/servers/"+id+"/discovery", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("discovery before connect: %d %s", resp.StatusCode, body)
+	}
+	var notYet map[string]string
+	json.Unmarshal(body, &notYet)
+	if notYet["error"] != "no discovery yet" {
+		t.Errorf("error = %q, want %q", notYet["error"], "no discovery yet")
+	}
+
+	if resp, body := h.do(t, "POST", "/api/servers/"+id+"/connect", nil); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("connect: %d %s", resp.StatusCode, body)
+	}
+
+	// Discovery runs in a goroutine after connect+auth, so poll briefly
+	// rather than assuming it has finished by the time connect returns.
+	var report discovery.Report
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, body := h.do(t, "GET", "/api/servers/"+id+"/discovery", nil)
+		if resp.StatusCode == http.StatusOK {
+			if err := json.Unmarshal(body, &report); err != nil {
+				t.Fatalf("unmarshal report: %v", err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("discovery never became available: last status %d %s", resp.StatusCode, body)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if report.Fingerprint != discovery.FingerprintZomboid {
+		t.Errorf("fingerprint = %q, want %q", report.Fingerprint, discovery.FingerprintZomboid)
+	}
+	if len(report.Options) == 0 || len(report.Commands) == 0 {
+		t.Errorf("expected non-empty options and commands, got %d and %d", len(report.Options), len(report.Commands))
+	}
+	for _, o := range report.Options {
+		if o.Key == "Password" || o.Key == "AdminPassword" {
+			t.Errorf("credential-shaped option %q leaked through the API", o.Key)
+		}
+	}
+
+	// The profile's persisted fingerprint follows the discovered one.
+	_, body = h.do(t, "GET", "/api/servers/"+id, nil)
+	var withGame struct {
+		Game string `json:"game"`
+	}
+	json.Unmarshal(body, &withGame)
+	if withGame.Game != "zomboid" {
+		t.Errorf("persisted game = %q, want zomboid", withGame.Game)
+	}
+
+	// A manual re-run returns fresh data synchronously -- no polling needed.
+	resp, body = h.do(t, "POST", "/api/servers/"+id+"/discover", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("manual discover: %d %s", resp.StatusCode, body)
+	}
+	var rerun discovery.Report
+	json.Unmarshal(body, &rerun)
+	if rerun.Fingerprint != discovery.FingerprintZomboid {
+		t.Errorf("rerun fingerprint = %q, want %q", rerun.Fingerprint, discovery.FingerprintZomboid)
+	}
+
+	// Disconnected, discovery has nothing live to probe: 409.
+	h.do(t, "POST", "/api/servers/"+id+"/disconnect", nil)
+	resp, body = h.do(t, "POST", "/api/servers/"+id+"/discover", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("discover while disconnected: %d %s, want 409", resp.StatusCode, body)
+	}
+	var notConnected map[string]string
+	json.Unmarshal(body, &notConnected)
+	if notConnected["error"] != "not connected" {
+		t.Errorf("error = %q, want %q", notConnected["error"], "not connected")
+	}
+
+	// The cache from before the disconnect is still there -- GET is a pure
+	// cache read and must not be affected by the session dropping.
+	resp, body = h.do(t, "GET", "/api/servers/"+id+"/discovery", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("discovery after disconnect: %d %s, want cached 200", resp.StatusCode, body)
+	}
+}
+
+// TestDiscoveryEventFiresOnAutomaticAndManualRuns pins a resolved ambiguity in
+// the discovery contract: the spec's prose calls out only the automatic
+// post-connect run publishing the summary event, but a manual re-scan is
+// otherwise invisible to any other browser tab watching the same profile's
+// event stream -- and the frontend's own App.tsx is written expecting a
+// discovery event from "this client or another client of the same daemon".
+// Both paths publish.
+func TestDiscoveryEventFiresOnAutomaticAndManualRuns(t *testing.T) {
+	h := newHarness(t, "", rcontest.Options{Handler: pzHandler(t)})
+	id := h.createServer(t)
+
+	events, unsubscribe := h.hub.Subscribe(id)
+	defer unsubscribe()
+
+	if resp, body := h.do(t, "POST", "/api/servers/"+id+"/connect", nil); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("connect: %d %s", resp.StatusCode, body)
+	}
+
+	waitForDiscoveryEvent := func() event.Event {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case e := <-events:
+				if e.Stream == event.StreamDiscovery {
+					return e
+				}
+			case <-deadline:
+				t.Fatal("timed out waiting for a discovery event")
+				return event.Event{}
+			}
+		}
+	}
+
+	first := waitForDiscoveryEvent()
+	if !strings.Contains(first.Line, "Project Zomboid") {
+		t.Errorf("automatic discovery event line = %q, want it to mention Project Zomboid", first.Line)
+	}
+	if first.Source != event.SourceSystem {
+		t.Errorf("source = %q, want %q", first.Source, event.SourceSystem)
+	}
+
+	if resp, body := h.do(t, "POST", "/api/servers/"+id+"/discover", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("manual discover: %d %s", resp.StatusCode, body)
+	}
+	second := waitForDiscoveryEvent()
+	if second.Seq <= first.Seq {
+		t.Errorf("manual discover's event Seq = %d, want greater than the automatic run's %d", second.Seq, first.Seq)
 	}
 }

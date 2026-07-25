@@ -1,0 +1,56 @@
+name: build-desktop
+
+# release.yml also builds the Windows desktop app, but only on a version tag,
+# so nothing exercises that path day to day -- and its Windows job has never
+# actually run. This workflow builds the same artifact on demand and on every
+# pull request that touches the app, so the Windows build is proven continuously
+# and a downloadable .exe exists without cutting a release.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "web/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/build-desktop.yml"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # go:embed needs the built frontend present before the Go build, and
+      # `make ui` shells out to pkg-config/grep that do not exist on a Windows
+      # runner, so the two npm steps are invoked directly.
+      - name: Build frontend
+        shell: bash
+        run: cd web && npm ci --prefer-offline --no-audit --fund=false && npm run build
+
+      # Windows uses WebView2, not WebKitGTK, so there is no webkit build tag to
+      # detect and no dev headers to install. -H windowsgui suppresses the
+      # console window that would otherwise open behind the app. This mirrors the
+      # command release.yml uses for its tagged Windows build.
+      - name: Build desktop app
+        shell: bash
+        run: |
+          go build -tags desktop,production \
+            -ldflags "-s -w -H windowsgui -X main.version=${GITHUB_SHA::8}" \
+            -o bin/rcon-ui-desktop.exe ./cmd/rcon-ui-desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rcon-ui-desktop-windows-amd64
+          path: bin/rcon-ui-desktop.exe
+          if-no-files-found: error

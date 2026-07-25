@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -133,6 +134,70 @@ func TestUpdateServerChangesPasswordWhenGiven(t *testing.T) {
 	}
 }
 
+// Game follows the same overwrite semantics as Group: an update replaces it
+// unconditionally, including with the empty string, so a profile can be
+// switched back to console-only.
+func TestUpdateServerGameOverwritesUnconditionally(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+
+	created, err := st.CreateServer(ctx, Server{Name: "pz", Addr: "h:1", Game: "zomboid"}, "p")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Game != "zomboid" {
+		t.Errorf("game = %q, want zomboid", created.Game)
+	}
+
+	updated, err := st.UpdateServer(ctx, created.ID, Server{Name: "pz", Game: "minecraft"}, nil)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Game != "minecraft" {
+		t.Errorf("game = %q, want minecraft", updated.Game)
+	}
+
+	cleared, err := st.UpdateServer(ctx, created.ID, Server{Name: "pz", Game: ""}, nil)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.Game != "" {
+		t.Errorf("game = %q, want cleared", cleared.Game)
+	}
+}
+
+// SetGame is the discovery pipeline's write path: unlike UpdateServer, it must
+// touch only the game column. A profile with a Group set is the regression
+// case -- UpdateServer's unconditional overwrite would silently clear it.
+func TestSetGame(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+
+	created, err := st.CreateServer(ctx, Server{Name: "pz", Addr: "h:1", Group: "survival"}, "p")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if err := st.SetGame(ctx, created.ID, "zomboid"); err != nil {
+		t.Fatalf("set game: %v", err)
+	}
+
+	got, err := st.GetServer(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Game != "zomboid" {
+		t.Errorf("game = %q, want zomboid", got.Game)
+	}
+	if got.Group != "survival" {
+		t.Errorf("group = %q, want unchanged %q", got.Group, "survival")
+	}
+
+	if err := st.SetGame(ctx, "does-not-exist", "zomboid"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("set game on missing profile: err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestDeleteServer(t *testing.T) {
 	st := newTestStore(t)
 	ctx := t.Context()
@@ -256,5 +321,53 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 
 	if _, err := second.GetServer(t.Context(), created.ID); err != nil {
 		t.Errorf("data lost across reopen: %v", err)
+	}
+}
+
+// A database written before the game column existed must migrate cleanly:
+// the ALTER TABLE runs, existing rows default to an empty game, and both
+// reading and writing the field work afterwards.
+func TestMigrationAddsGameColumnToExistingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec(migrations[0]); err != nil {
+		t.Fatalf("apply v1 schema: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO servers (id, name, protocol, addr, grp, password, created_at, updated_at)
+		 VALUES ('old-id', 'legacy', 'source', 'h:1', '', x'00', 0, 0)`); err != nil {
+		t.Fatalf("seed pre-migration row: %v", err)
+	}
+	if _, err := raw.Exec(`PRAGMA user_version = 1`); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	sealer, _ := secret.NewFromKey([]byte("k"))
+	st, err := Open(path, sealer)
+	if err != nil {
+		t.Fatalf("open with migration: %v", err)
+	}
+	defer st.Close()
+
+	srv, err := st.GetServer(t.Context(), "old-id")
+	if err != nil {
+		t.Fatalf("get pre-existing row: %v", err)
+	}
+	if srv.Game != "" {
+		t.Errorf("game = %q, want empty default for a row predating the column", srv.Game)
+	}
+
+	created, err := st.CreateServer(t.Context(), Server{Name: "new", Addr: "h:2", Game: "zomboid"}, "p")
+	if err != nil {
+		t.Fatalf("create after migration: %v", err)
+	}
+	if created.Game != "zomboid" {
+		t.Errorf("game = %q, want zomboid", created.Game)
 	}
 }

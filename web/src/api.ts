@@ -17,15 +17,43 @@ export interface Server {
   createdAt: string;
   updatedAt: string;
   status: Status;
+  // The last fingerprint discovery settled on for this server, persisted so
+  // the rail can show a game chip before a connection (and thus a fresh
+  // discovery pass) exists.
+  game?: string;
 }
 
 export interface RconEvent {
   seq: number;
   profileId: string;
   source: string;
-  stream: "command" | "response" | "status" | "error";
+  stream: "command" | "response" | "status" | "error" | "discovery";
   line: string;
   at: string;
+}
+
+export interface DiscoveredCommand {
+  name: string;
+  description: string;
+  usage: string;
+}
+
+export interface DiscoveredOption {
+  key: string;
+  value: string;
+  type: "boolean" | "integer" | "number" | "string";
+}
+
+export interface DiscoveryReport {
+  fingerprint: "zomboid" | "minecraft" | "unknown";
+  label: string;
+  at: string;
+  capabilities: { commands: boolean; options: boolean; optionWrite: boolean };
+  // Substitutes {key}/{value} literally; empty when optionWrite is false, in
+  // which case there is no write path to build a command string from.
+  writeTemplate: string;
+  commands: DiscoveredCommand[];
+  options: DiscoveredOption[];
 }
 
 export interface Macro {
@@ -159,6 +187,14 @@ export const api = {
 
   execute: (id: string, command: string) =>
     request<{ response: string }>("POST", `/api/servers/${id}/execute`, { command }),
+
+  // Callers distinguish "never scanned" (404) from a real failure by checking
+  // ApiError.status themselves -- that boundary is meaningful here (it is the
+  // bottom rung of the degradation ladder, not an error state) so it is not
+  // collapsed inside the client.
+  discovery: (id: string) => request<DiscoveryReport>("GET", `/api/servers/${id}/discovery`),
+
+  discover: (id: string) => request<DiscoveryReport>("POST", `/api/servers/${id}/discover`),
 
   history: (id: string, limit = 100) =>
     request<HistoryEntry[]>("GET", `/api/servers/${id}/history?limit=${limit}`),

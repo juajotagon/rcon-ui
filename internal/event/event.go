@@ -26,10 +26,11 @@ const (
 
 // Stream identifies what kind of line this is, within a source.
 const (
-	StreamCommand  = "command"  // a command the user sent
-	StreamResponse = "response" // a server's reply to that command
-	StreamStatus   = "status"   // a connection state change
-	StreamError    = "error"    // a failure worth showing in the console
+	StreamCommand   = "command"   // a command the user sent
+	StreamResponse  = "response"  // a server's reply to that command
+	StreamStatus    = "status"    // a connection state change
+	StreamError     = "error"     // a failure worth showing in the console
+	StreamDiscovery = "discovery" // a discovery report finished; refetch it
 )
 
 // Event is one line destined for a console pane.

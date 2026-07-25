@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juajotagon/rcon-ui/internal/discovery"
 	"github.com/juajotagon/rcon-ui/internal/event"
 	"github.com/juajotagon/rcon-ui/internal/rcon"
 	"github.com/juajotagon/rcon-ui/internal/store"
@@ -60,17 +61,25 @@ type Manager struct {
 	mu   sync.Mutex
 	sess map[string]*Session
 	wg   sync.WaitGroup
+
+	// discoveries caches the most recent Report per profile for the life of
+	// the daemon process. It lives on the Manager rather than the Session so
+	// that GET .../discovery keeps answering from cache across a reconnect,
+	// which replaces the Session struct -- only a daemon restart clears it.
+	discoveryMu sync.Mutex
+	discoveries map[string]discovery.Report
 }
 
 func NewManager(st *store.Store, hub *event.Hub, log *slog.Logger) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		store:  st,
-		hub:    hub,
-		log:    log,
-		ctx:    ctx,
-		cancel: cancel,
-		sess:   make(map[string]*Session),
+		store:       st,
+		hub:         hub,
+		log:         log,
+		ctx:         ctx,
+		cancel:      cancel,
+		sess:        make(map[string]*Session),
+		discoveries: make(map[string]discovery.Report),
 	}
 }
 
@@ -179,6 +188,78 @@ func (m *Manager) Execute(ctx context.Context, profileID, cmd string) (string, e
 	return resp, nil
 }
 
+// LastDiscovery returns the most recent discovery Report for a profile, if
+// any run has completed since the daemon started. The bool is false rather
+// than a zero Report standing in for "none yet", so a caller can't mistake an
+// unknown-fingerprint Report for the absence of one.
+func (m *Manager) LastDiscovery(profileID string) (discovery.Report, bool) {
+	m.discoveryMu.Lock()
+	defer m.discoveryMu.Unlock()
+	r, ok := m.discoveries[profileID]
+	return r, ok
+}
+
+// Discover runs discovery synchronously against a profile's live session. It
+// requires the session to already be connected: discovery has nothing to
+// probe otherwise, and unlike Execute, it must not connect on demand or block
+// waiting for one -- a caller asking "what is this server" wants a fast,
+// honest answer about right now, not a wait for a session that may never come
+// up.
+//
+// It publishes the same discovery-stream event an automatic run does. The
+// spec calls out only the automatic case explicitly, but a manual re-scan is
+// otherwise invisible to any other browser tab open on the same profile --
+// this caller gets the fresh Report back directly, but a second viewer has no
+// way to learn the report just changed without the event.
+func (m *Manager) Discover(ctx context.Context, profileID string) (discovery.Report, error) {
+	m.mu.Lock()
+	s, ok := m.sess[profileID]
+	m.mu.Unlock()
+
+	if !ok || s.Status() != StatusConnected {
+		return discovery.Report{}, ErrNotConnected
+	}
+
+	return m.runDiscovery(ctx, s), nil
+}
+
+// runDiscovery probes s, caches the Report, persists a changed fingerprint,
+// publishes the discovery-stream summary event, and returns the Report. It
+// backs both the manual /discover endpoint and the automatic post-connect
+// run, so the two stay identical in every observable effect except who
+// triggered them.
+func (m *Manager) runDiscovery(ctx context.Context, s *Session) discovery.Report {
+	report := discovery.Discover(ctx, s.quietExecute)
+
+	m.discoveryMu.Lock()
+	m.discoveries[s.profileID] = report
+	m.discoveryMu.Unlock()
+
+	if srv, err := m.store.GetServer(ctx, s.profileID); err != nil {
+		m.log.Warn("could not read profile to persist discovered fingerprint", "profile", s.profileID, "error", err)
+	} else if srv.Game != report.Fingerprint {
+		if err := m.store.SetGame(ctx, s.profileID, report.Fingerprint); err != nil {
+			m.log.Warn("could not persist discovered fingerprint", "profile", s.profileID, "error", err)
+		}
+	}
+
+	m.hub.Publish(event.Event{
+		ProfileID: s.profileID,
+		Source:    event.SourceSystem,
+		Stream:    event.StreamDiscovery,
+		Line:      fmt.Sprintf("%s · %d options · %d commands", report.Label, len(report.Options), len(report.Commands)),
+	})
+
+	return report
+}
+
+// autoDiscover runs discovery right after a session connects. It is fired in
+// its own goroutine from supervise so a slow or hanging discovery probe never
+// delays the connection from reporting itself connected.
+func (m *Manager) autoDiscover(ctx context.Context, s *Session) {
+	m.runDiscovery(ctx, s)
+}
+
 // Status reports a profile's state. Profiles with no session read as
 // disconnected, which is what the UI should show for a server nobody has
 // opened yet.
@@ -240,8 +321,13 @@ type Session struct {
 
 	// broken is signalled by Execute when a command fails, waking the
 	// supervisor to reconnect rather than waiting for the next command.
-	brokenOnce sync.Once
-	broken     chan struct{}
+	// brokenClosed guards it against a double close and is reset alongside
+	// broken, under the same lock, on every reconnect -- so a channel from one
+	// connection generation can never be closed against the guard of another
+	// (which used to happen with a sync.Once field: Do() reads whatever Once is
+	// live *now*, not the one live when the channel was captured).
+	brokenClosed bool
+	broken       chan struct{}
 }
 
 func (s *Session) Status() Status {
@@ -293,16 +379,39 @@ func (s *Session) markBroken(err error) {
 	s.mu.Lock()
 	client := s.client
 	s.client = nil
-	ch := s.broken
+	// The close must happen in the same critical section that reads broken /
+	// brokenClosed: releasing the lock first (as a captured-channel-plus-Once
+	// design used to) lets a concurrent reconnect reset both fields between the
+	// read and the close, pairing a stale channel with a fresh guard and
+	// closing it twice.
+	if s.broken != nil && !s.brokenClosed {
+		s.brokenClosed = true
+		close(s.broken)
+	}
 	s.mu.Unlock()
 
 	if client != nil {
 		_ = client.Close()
 	}
-	if ch != nil {
-		s.brokenOnce.Do(func() { close(ch) })
-	}
 	s.setStatus(StatusDisconnected, err.Error())
+}
+
+// quietExecute runs cmd directly against the live client, bypassing Execute's
+// event-publishing and history-recording. Discovery probes dozens of commands
+// per run (the vanilla gamerule sweep alone is ~40 queries); routing that
+// through Execute would flood both the console and the history table with
+// probe traffic the user never typed. It does not wait for a connection --
+// discovery only ever runs against a session already known to be connected --
+// so a client of nil is reported as ErrNotConnected rather than blocked on.
+func (s *Session) quietExecute(ctx context.Context, cmd string) (string, error) {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+
+	if client == nil {
+		return "", ErrNotConnected
+	}
+	return client.Execute(ctx, cmd)
 }
 
 // waitReady returns the live client, waiting for a connection if one is being
@@ -365,10 +474,17 @@ func (s *Session) supervise(ctx context.Context) {
 		s.mu.Lock()
 		s.client = client
 		s.broken = broken
-		s.brokenOnce = sync.Once{}
+		s.brokenClosed = false
 		s.mu.Unlock()
 
 		s.setStatus(StatusConnected, "")
+
+		// Every successful connect+auth gets its own discovery run, not just
+		// the first: a reconnect can land on a different server behind the
+		// same address, or catch one that has changed its options since we
+		// last looked. Runs in its own goroutine so a slow probe sequence
+		// never delays the connection reporting itself connected.
+		go s.mgr.autoDiscover(ctx, s)
 
 		select {
 		case <-broken:

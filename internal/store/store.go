@@ -39,6 +39,7 @@ type Server struct {
 	Protocol  string    `json:"protocol"`
 	Addr      string    `json:"addr"`
 	Group     string    `json:"group,omitempty"`
+	Game      string    `json:"game,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -123,6 +124,8 @@ var migrations = []string{
 		at        INTEGER NOT NULL
 	);
 	CREATE INDEX history_server_at ON history(server_id, at DESC);`,
+
+	`ALTER TABLE servers ADD COLUMN game TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {
@@ -193,9 +196,9 @@ func (s *Store) CreateServer(ctx context.Context, srv Server, password string) (
 	srv.UpdatedAt = now
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO servers (id, name, protocol, addr, grp, password, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		srv.ID, srv.Name, srv.Protocol, srv.Addr, srv.Group, sealed,
+		`INSERT INTO servers (id, name, protocol, addr, grp, game, password, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		srv.ID, srv.Name, srv.Protocol, srv.Addr, srv.Group, srv.Game, sealed,
 		now.UnixMilli(), now.UnixMilli())
 	if err != nil {
 		return Server{}, fmt.Errorf("store: insert server: %w", err)
@@ -221,6 +224,7 @@ func (s *Store) UpdateServer(ctx context.Context, id string, srv Server, passwor
 		existing.Protocol = srv.Protocol
 	}
 	existing.Group = srv.Group
+	existing.Game = srv.Game
 	existing.UpdatedAt = time.Now().UTC().Truncate(time.Millisecond)
 
 	if password != nil {
@@ -234,8 +238,8 @@ func (s *Store) UpdateServer(ctx context.Context, id string, srv Server, passwor
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE servers SET name = ?, protocol = ?, addr = ?, grp = ?, updated_at = ? WHERE id = ?`,
-		existing.Name, existing.Protocol, existing.Addr, existing.Group,
+		`UPDATE servers SET name = ?, protocol = ?, addr = ?, grp = ?, game = ?, updated_at = ? WHERE id = ?`,
+		existing.Name, existing.Protocol, existing.Addr, existing.Group, existing.Game,
 		existing.UpdatedAt.UnixMilli(), id)
 	if err != nil {
 		return Server{}, fmt.Errorf("store: update server: %w", err)
@@ -256,7 +260,7 @@ func (s *Store) DeleteServer(ctx context.Context, id string) error {
 
 func (s *Store) GetServer(ctx context.Context, id string) (Server, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, protocol, addr, grp, created_at, updated_at FROM servers WHERE id = ?`, id)
+		`SELECT id, name, protocol, addr, grp, game, created_at, updated_at FROM servers WHERE id = ?`, id)
 
 	srv, err := scanServer(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -267,7 +271,7 @@ func (s *Store) GetServer(ctx context.Context, id string) (Server, error) {
 
 func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, protocol, addr, grp, created_at, updated_at
+		`SELECT id, name, protocol, addr, grp, game, created_at, updated_at
 		 FROM servers ORDER BY grp, name`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list servers: %w", err)
@@ -284,6 +288,26 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 		out = append(out, srv)
 	}
 	return out, rows.Err()
+}
+
+// SetGame persists a freshly discovered fingerprint into a profile's game
+// field. It exists alongside UpdateServer rather than reusing it because
+// UpdateServer overwrites game unconditionally (see
+// TestUpdateServerGameOverwritesUnconditionally) -- fine for an edit form
+// that always submits every field, wrong for the discovery pipeline, which
+// only ever wants to touch this one column and must never clobber Group or
+// anything else in the same request.
+func (s *Store) SetGame(ctx context.Context, id, game string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE servers SET game = ?, updated_at = ? WHERE id = ?`,
+		game, time.Now().UTC().Truncate(time.Millisecond).UnixMilli(), id)
+	if err != nil {
+		return fmt.Errorf("store: set game: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Password unseals a stored RCON password. It is the only way out of the store,
@@ -308,7 +332,7 @@ func scanServer(sc scanner) (Server, error) {
 		srv                  Server
 		createdMS, updatedMS int64
 	)
-	if err := sc.Scan(&srv.ID, &srv.Name, &srv.Protocol, &srv.Addr, &srv.Group, &createdMS, &updatedMS); err != nil {
+	if err := sc.Scan(&srv.ID, &srv.Name, &srv.Protocol, &srv.Addr, &srv.Group, &srv.Game, &createdMS, &updatedMS); err != nil {
 		return Server{}, err
 	}
 	srv.CreatedAt = time.UnixMilli(createdMS).UTC()

@@ -113,6 +113,8 @@ Two things worth understanding before exposing this beyond localhost:
 | `POST` | `/api/servers/{id}/connect` | open a session |
 | `POST` | `/api/servers/{id}/execute` | run a command |
 | `GET` | `/api/servers/{id}/history` | recent commands |
+| `GET` | `/api/servers/{id}/discovery` | cached fingerprint + capabilities report |
+| `POST` | `/api/servers/{id}/discover` | re-run discovery against the live session |
 | `GET`/`POST` | `/api/macros` | saved commands |
 | `GET` | `/api/events` | live event stream (SSE) |
 

@@ -8,6 +8,8 @@ package source
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -60,10 +62,9 @@ type Client struct {
 func Dial(ctx context.Context, t rcon.Target) (*Client, error) {
 	timeout := t.TimeoutOrDefault()
 
-	var nd net.Dialer
-	conn, err := nd.DialContext(ctx, "tcp", t.Addr)
+	conn, err := dial(ctx, t)
 	if err != nil {
-		return nil, fmt.Errorf("source: dial %s: %w", t.Addr, err)
+		return nil, err
 	}
 
 	c := &Client{conn: conn, timeout: timeout}
@@ -72,6 +73,61 @@ func Dial(ctx context.Context, t rcon.Target) (*Client, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// dial opens the transport, optionally wrapped in TLS.
+//
+// TLS here is not part of the RCON dialect -- the protocol inside the tunnel is
+// byte-identical. It exists because RCON sends its password in cleartext on the
+// first packet, so any server reachable outside a trusted network is normally
+// fronted by a TLS-terminating proxy.
+func dial(ctx context.Context, t rcon.Target) (net.Conn, error) {
+	var nd net.Dialer
+
+	conn, err := nd.DialContext(ctx, "tcp", t.Addr)
+	if err != nil {
+		return nil, fmt.Errorf("source: dial %s: %w", t.Addr, err)
+	}
+	if !t.TLS {
+		return conn, nil
+	}
+
+	serverName := t.ServerName
+	if serverName == "" {
+		// Fall back to the host part of Addr. Connecting to a bare IP this way
+		// will fail verification against a certificate issued for a domain,
+		// which is correct: the alternative is silently accepting any
+		// certificate, and a password crosses this connection.
+		host, _, splitErr := net.SplitHostPort(t.Addr)
+		if splitErr != nil {
+			conn.Close()
+			return nil, fmt.Errorf("source: cannot derive TLS server name from %q: %w", t.Addr, splitErr)
+		}
+		serverName = host
+	}
+
+	tlsConn := tls.Client(conn, &tls.Config{
+		ServerName: serverName,
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    rootCAs, // nil in production: the system trust store
+	})
+
+	// Bound the handshake by the caller's deadline; without this a proxy that
+	// accepts the TCP connection but never completes the handshake hangs here
+	// indefinitely.
+	if deadline, ok := ctx.Deadline(); ok {
+		conn.SetDeadline(deadline)
+	} else {
+		conn.SetDeadline(time.Now().Add(t.TimeoutOrDefault()))
+	}
+
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("source: TLS handshake with %s (server name %q): %w", t.Addr, serverName, err)
+	}
+	conn.SetDeadline(time.Time{}) // cleared; per-operation deadlines take over
+
+	return tlsConn, nil
 }
 
 // authenticate performs the AUTH handshake. It runs before the Client is
@@ -246,3 +302,14 @@ func (c *Client) watchContext(ctx context.Context) (stop func()) {
 	}()
 	return func() { close(done) }
 }
+
+// rootCAs overrides the trust store. It is nil in production, meaning the
+// system pool; only tests set it, so that a self-signed certificate can stand
+// in for a real TLS-terminating proxy.
+//
+// Deliberately not exposed on Target: "trust this extra CA" and "skip
+// verification" are the two knobs that quietly turn TLS into decoration, and
+// this connection carries an RCON password in its first packet. If a real need
+// for custom CAs appears, it should arrive as an explicit, documented option
+// rather than as a general escape hatch.
+var rootCAs *x509.CertPool

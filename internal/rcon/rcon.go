@@ -52,6 +52,24 @@ type Target struct {
 
 	// Timeout bounds each read and write. Zero means DefaultTimeout.
 	Timeout time.Duration
+
+	// TLS wraps the connection in TLS before any RCON traffic.
+	//
+	// RCON has no transport security of its own: the password crosses the wire
+	// in the clear on the very first packet. That is tolerable on a LAN or
+	// inside a cluster, and not tolerable across the internet, so exposing a
+	// server usually means fronting it with a TLS-terminating proxy. This
+	// speaks plain Source RCON inside the tunnel -- the dialect is unchanged,
+	// only the transport differs.
+	TLS bool
+
+	// ServerName is the SNI name and the name verified against the
+	// certificate. Required when the proxy routes by SNI, and when connecting
+	// by IP to a host whose certificate names a domain -- without it the
+	// verification fails against the IP rather than the name.
+	//
+	// Ignored unless TLS is set.
+	ServerName string
 }
 
 // TimeoutOrDefault resolves Timeout, substituting DefaultTimeout when unset.

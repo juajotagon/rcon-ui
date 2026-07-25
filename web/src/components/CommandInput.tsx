@@ -1,5 +1,14 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Macro } from "../api";
+
+/** A prefill request from elsewhere in the app (the Commands panel's "run…").
+ * `nonce` exists so the same text can be requested twice in a row and still
+ * be noticed -- an effect keyed on the text alone would see no change.
+ */
+export interface Prefill {
+  text: string;
+  nonce: number;
+}
 
 /** CommandInput is the console prompt, with shell-style history.
  *
@@ -12,17 +21,34 @@ export function CommandInput({
   disabled,
   history,
   macros,
+  commandNames = [],
+  prefill,
   onSubmit,
 }: {
   disabled: boolean;
   history: string[];
   macros: Macro[];
+  // Discovered command names, for Tab-completion -- a prefix match only, not
+  // a shell-grade completer; the catalog is flat and rarely long enough to
+  // need more.
+  commandNames?: string[];
+  prefill?: Prefill | null;
   onSubmit: (command: string) => void;
 }) {
   const [value, setValue] = useState("");
   const [index, setIndex] = useState(-1); // -1 means "editing a fresh line"
   const draft = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Jumping to the Console tab with a command name queued up (from "run…" in
+  // the Commands panel) is driven by a nonce so re-requesting the same text
+  // still lands.
+  useEffect(() => {
+    if (!prefill) return;
+    setValue(prefill.text);
+    setIndex(-1);
+    inputRef.current?.focus();
+  }, [prefill]);
 
   const submit = () => {
     const cmd = value.trim();
@@ -56,6 +82,18 @@ export function CommandInput({
       const next = index - 1;
       setIndex(next);
       setValue(next === -1 ? draft.current : history[next]);
+      return;
+    }
+
+    if (e.key === "Tab") {
+      // Only completes the first (command-name) word -- arguments are the
+      // server's business, not something we can guess from a name list.
+      const [head, ...rest] = value.split(" ");
+      if (!head) return;
+      const match = commandNames.find((c) => c.startsWith(head) && c !== head);
+      if (!match) return;
+      e.preventDefault();
+      setValue([match, ...rest].join(" "));
     }
   };
 
@@ -90,7 +128,13 @@ export function CommandInput({
             setIndex(-1);
           }}
           onKeyDown={onKeyDown}
-          placeholder={disabled ? "Not connected" : "Type a command, ↑ for history"}
+          placeholder={
+            disabled
+              ? "Not connected"
+              : commandNames.length > 0
+                ? "Type a command… (↑ history · Tab completes)"
+                : "Type a command, ↑ for history"
+          }
           spellCheck={false}
           autoComplete="off"
           className="flex-1 bg-transparent font-mono text-sm outline-none disabled:opacity-50"

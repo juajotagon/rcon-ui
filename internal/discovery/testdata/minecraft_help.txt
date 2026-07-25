@@ -1,0 +1,25 @@
+--- Showing help page 1 of 4 (/help <page>) ---
+/advancement (grant|revoke) <targets> <advancement> [<criterion>]
+/attribute <target> <attribute> get [<scale>]
+/ban <targets> [<reason>]
+/ban-ip <target> [<reason>]
+/banlist [players|ips]
+/bossbar (add|get|list|remove|set) ...
+/clear [<targets>] [<item>] [<maxCount>]
+/clone <begin> <end> <destination>
+/data (get|merge|modify|remove) ...
+/datapack (enable|disable|list)
+/debug (start|stop|function)
+/defaultgamemode <gamemode>
+/deop <targets>
+/difficulty [peaceful|easy|normal|hard]
+/effect (clear|give) <targets> [<effect>]
+/enchant <targets> <enchantment> [<level>]
+/execute ...
+/experience (add|set|query) <targets> ...
+/fill <from> <to> <block> [destroy|keep|hollow|outline|replace]
+/forceload (add|remove|query)
+/function <name>
+/gamemode <gamemode> [<target>]
+/gamerule <rule> [<value>]
+/give <target> <item> [<count>]
