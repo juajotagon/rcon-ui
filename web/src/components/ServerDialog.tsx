@@ -23,7 +23,11 @@ export function ServerDialog({
   const [password, setPassword] = useState("");
   const [group, setGroup] = useState(server?.group ?? "");
   const [protocol, setProtocol] = useState(server?.protocol ?? "source");
-  const [advanced, setAdvanced] = useState(false);
+  const [tls, setTls] = useState(server?.tls ?? false);
+  const [serverName, setServerName] = useState(server?.serverName ?? "");
+  // Open Advanced from the start when the profile already uses it, so the
+  // settings being edited are visible rather than silently applied.
+  const [advanced, setAdvanced] = useState(Boolean(server?.tls || server?.group));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,12 +47,22 @@ export function ServerDialog({
           addr,
           group,
           protocol,
+          tls,
+          serverName: tls ? serverName : "",
           // Omitted rather than sent empty, so an edit that does not touch the
           // password leaves the stored one alone.
           ...(password ? { password } : {}),
         });
       } else {
-        await api.createServer({ name, addr, password, group, protocol });
+        await api.createServer({
+          name,
+          addr,
+          password,
+          group,
+          protocol,
+          tls,
+          serverName: tls ? serverName : "",
+        });
       }
       onSaved();
       onClose();
@@ -139,6 +153,32 @@ export function ServerDialog({
                   ))}
                 </select>
               </Field>
+
+              <label className="flex items-center gap-2 text-xs font-medium">
+                <input
+                  type="checkbox"
+                  checked={tls}
+                  onChange={(e) => setTls(e.target.checked)}
+                />
+                Connect through TLS
+                <span className="font-normal" style={{ color: "var(--color-text-muted)" }}>
+                  for servers behind a TLS-terminating proxy
+                </span>
+              </label>
+
+              {tls && (
+                <Field
+                  label="TLS server name"
+                  hint="Optional. Only needed when the certificate names a different host than the address."
+                >
+                  <input
+                    value={serverName}
+                    onChange={(e) => setServerName(e.target.value)}
+                    placeholder="zomboid.example.com"
+                    className="field font-mono"
+                  />
+                </Field>
+              )}
             </div>
           )}
 

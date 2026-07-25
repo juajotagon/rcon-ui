@@ -21,6 +21,12 @@ export interface Server {
   // the rail can show a game chip before a connection (and thus a fresh
   // discovery pass) exists.
   game?: string;
+  // RCON has no transport security of its own, so a server exposed across the
+  // internet is usually fronted by a TLS-terminating proxy; tls dials through
+  // it, and serverName overrides the SNI/certificate name when it differs
+  // from the host in addr.
+  tls?: boolean;
+  serverName?: string;
 }
 
 export interface RconEvent {
@@ -173,11 +179,21 @@ export const api = {
     password: string;
     protocol?: string;
     group?: string;
+    tls?: boolean;
+    serverName?: string;
   }) => request<Server>("POST", "/api/servers", input),
 
   updateServer: (
     id: string,
-    input: { name?: string; addr?: string; protocol?: string; group?: string; password?: string },
+    input: {
+      name?: string;
+      addr?: string;
+      protocol?: string;
+      group?: string;
+      password?: string;
+      tls?: boolean;
+      serverName?: string;
+    },
   ) => request<Server>("PATCH", `/api/servers/${id}`, input),
 
   deleteServer: (id: string) => request<void>("DELETE", `/api/servers/${id}`),

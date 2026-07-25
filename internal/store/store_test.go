@@ -166,6 +166,38 @@ func TestUpdateServerGameOverwritesUnconditionally(t *testing.T) {
 	}
 }
 
+// TLS and ServerName follow the same overwrite semantics as Group and Game: an
+// update replaces them unconditionally, including back to the zero value, so
+// unchecking TLS in the edit form actually clears it rather than sticking.
+func TestUpdateServerTLSOverwritesUnconditionally(t *testing.T) {
+	st := newTestStore(t)
+	ctx := t.Context()
+
+	created, err := st.CreateServer(ctx, Server{Name: "pz", Addr: "h:1", TLS: true, ServerName: "zomboid.juanjo.site"}, "p")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !created.TLS || created.ServerName != "zomboid.juanjo.site" {
+		t.Errorf("got tls=%v serverName=%q, want tls=true serverName=zomboid.juanjo.site", created.TLS, created.ServerName)
+	}
+
+	updated, err := st.UpdateServer(ctx, created.ID, Server{Name: "pz", TLS: true, ServerName: "other.example.com"}, nil)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.ServerName != "other.example.com" {
+		t.Errorf("serverName = %q, want other.example.com", updated.ServerName)
+	}
+
+	cleared, err := st.UpdateServer(ctx, created.ID, Server{Name: "pz"}, nil)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.TLS || cleared.ServerName != "" {
+		t.Errorf("got tls=%v serverName=%q, want both cleared", cleared.TLS, cleared.ServerName)
+	}
+}
+
 // SetGame is the discovery pipeline's write path: unlike UpdateServer, it must
 // touch only the game column. A profile with a Group set is the regression
 // case -- UpdateServer's unconditional overwrite would silently clear it.
@@ -369,5 +401,56 @@ func TestMigrationAddsGameColumnToExistingDatabase(t *testing.T) {
 	}
 	if created.Game != "zomboid" {
 		t.Errorf("game = %q, want zomboid", created.Game)
+	}
+}
+
+// A database written before the tls/server_name columns existed must migrate
+// cleanly: both ALTER TABLEs run, existing rows default to tls=false and an
+// empty server name, and both reading and writing the fields work afterwards.
+func TestMigrationAddsTLSColumnsToExistingDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec(migrations[0]); err != nil {
+		t.Fatalf("apply v1 schema: %v", err)
+	}
+	if _, err := raw.Exec(migrations[1]); err != nil {
+		t.Fatalf("apply v2 schema: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO servers (id, name, protocol, addr, grp, game, password, created_at, updated_at)
+		 VALUES ('old-id', 'legacy', 'source', 'h:1', '', '', x'00', 0, 0)`); err != nil {
+		t.Fatalf("seed pre-migration row: %v", err)
+	}
+	if _, err := raw.Exec(`PRAGMA user_version = 2`); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	sealer, _ := secret.NewFromKey([]byte("k"))
+	st, err := Open(path, sealer)
+	if err != nil {
+		t.Fatalf("open with migration: %v", err)
+	}
+	defer st.Close()
+
+	srv, err := st.GetServer(t.Context(), "old-id")
+	if err != nil {
+		t.Fatalf("get pre-existing row: %v", err)
+	}
+	if srv.TLS || srv.ServerName != "" {
+		t.Errorf("got tls=%v serverName=%q, want both defaulted for a row predating the columns", srv.TLS, srv.ServerName)
+	}
+
+	created, err := st.CreateServer(t.Context(), Server{Name: "new", Addr: "h:2", TLS: true, ServerName: "zomboid.juanjo.site"}, "p")
+	if err != nil {
+		t.Fatalf("create after migration: %v", err)
+	}
+	if !created.TLS || created.ServerName != "zomboid.juanjo.site" {
+		t.Errorf("got tls=%v serverName=%q, want tls=true serverName=zomboid.juanjo.site", created.TLS, created.ServerName)
 	}
 }
